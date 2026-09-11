@@ -2,11 +2,14 @@
 
 namespace Plugins\G7\Forum\Addon\Http\Controllers;
 
+use App\Enums\UserStatus;
 use App\Http\Controllers\Api\Base\PublicBaseController;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Modules\Sirsoft\Board\Traits\FormatsBoardDate;
 use Plugins\G7\Forum\Addon\Support\AcceptedReplyState;
 use Plugins\G7\Forum\Addon\Support\PostLockState;
 use Plugins\G7\Forum\Addon\Support\PostVisibilityGuard;
@@ -33,6 +36,8 @@ use Plugins\G7\Forum\Addon\Support\ReactionStore;
  */
 class PostMetaController extends PublicBaseController
 {
+    use FormatsBoardDate;
+
     public function __construct(
         private readonly PostVisibilityGuard $visibilityGuard,
     ) {
@@ -62,6 +67,11 @@ class PostMetaController extends PublicBaseController
             $commentReactions = ReactionStore::summaryForComments($commentIds, $userId);
         }
 
+        // 베스트답글(채택): 포럼 게시글일 때만. 채택 댓글이 삭제/블라인드/무효면
+        // resolveForMeta() 가 그 자리에서 null 로 정리(자기치유) — 그 결과를 그대로
+        // 따라가므로 이 시점에 유효하지 않은 댓글의 전문을 내려줄 일은 없다.
+        $acceptedReplyId = $isForum ? AcceptedReplyState::resolveForMeta($id) : null;
+
         return $this->success('common.success', [
             // 게시글 리액션 요약: {counts:{like,love,haha,wow,sad}, total, mine}
             'reactions' => $isForum
@@ -71,14 +81,62 @@ class PostMetaController extends PublicBaseController
             'comment_reactions' => $commentReactions,
             'tags' => [],
             'subscribed' => false,
-            // 베스트답글(채택): 포럼 게시글일 때만. 채택 댓글이 삭제/블라인드/무효면
-            // resolveForMeta() 가 그 자리에서 null 로 정리(자기치유).
-            'accepted_reply_id' => $isForum ? AcceptedReplyState::resolveForMeta($id) : null,
+            'accepted_reply_id' => $acceptedReplyId,
+            // 채택된 댓글 전문 — {id, content, author:{uuid,name,avatar}, created_at,
+            // created_at_formatted} 또는 null. content 는 g7-comment-editor 가 정화한
+            // HTML 을 그대로 반환한다(서버는 재검열하지 않음 — 위젯 쪽 렌더링이 기존
+            // 댓글 표시와 동일한 방식(text 바인딩 → g7-comment-editor 재정화 승격)으로
+            // 표시해 XSS 방어를 그대로 상속받는다).
+            'accepted_reply' => $acceptedReplyId !== null ? $this->buildAcceptedReplyDetails($acceptedReplyId) : null,
             // 잠금(Lock): 포럼형 게시판 + 메타 행 is_locked=1 일 때만 true.
             // 비-포럼 게시판이면 PostLockState 내부 조인이 걸러 항상 false.
             'locked' => PostLockState::isLocked($id),
             // 고정(공지): sirsoft-board board_posts.is_notice 를 그대로 반영 (애드온 미저장).
             'is_notice' => (bool) ($resolved->post->is_notice ?? false),
         ]);
+    }
+
+    /**
+     * 채택된 댓글의 전문/작성자/시각을 조회합니다.
+     *
+     * `accepted_reply_id` 가 `resolveForMeta()` 로 이미 유효성(존재·이 게시글 소속·
+     * 삭제/블라인드 아님) 검증을 마친 뒤 호출되므로, 여기서는 존재 여부만 방어적으로
+     * 다시 확인한다(경합 등 극히 드문 경우 대비).
+     *
+     * @return array{id: int, content: string, author: array{uuid: string|null, name: string, avatar: string|null}, created_at: string|null, created_at_formatted: string}|null
+     */
+    private function buildAcceptedReplyDetails(int $commentId): ?array
+    {
+        $comment = DB::table('board_comments')->where('id', $commentId)->first();
+
+        if ($comment === null) {
+            return null;
+        }
+
+        $author = null;
+        if ($comment->user_id !== null) {
+            $user = User::find($comment->user_id);
+            if ($user !== null) {
+                $isWithdrawn = UserStatus::tryFrom($user->status) === UserStatus::Withdrawn;
+                $author = [
+                    'uuid' => $user->uuid,
+                    'name' => $isWithdrawn ? __('user.withdrawn_user') : $user->name,
+                    'avatar' => $isWithdrawn ? null : $user->getAvatarUrl(),
+                ];
+            }
+        }
+        if ($author === null) {
+            $author = ['uuid' => null, 'name' => $comment->author_name ?? '', 'avatar' => null];
+        }
+
+        $dateFormat = g7_module_settings('sirsoft-board', 'display.date_display_format', 'standard');
+
+        return [
+            'id' => (int) $comment->id,
+            'content' => $comment->content,
+            'author' => $author,
+            'created_at' => $comment->created_at,
+            'created_at_formatted' => $this->formatCreatedAtFormat($comment->created_at, $dateFormat),
+        ];
     }
 }

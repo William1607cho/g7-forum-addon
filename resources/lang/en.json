@@ -13,5 +13,7 @@
   "accepted_badge": "✅ Accepted answer",
   "accept_button": "Accept",
   "unaccept_button": "Unaccept",
-  "widget_has_accepted": "✅ This thread has an accepted answer"
+  "widget_has_accepted": "✅ This thread has an accepted answer",
+  "list_participants_header": "Participants",
+  "list_last_activity_header": "Last Activity"
 }

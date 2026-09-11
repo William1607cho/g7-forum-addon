@@ -13,5 +13,7 @@
   "accepted_badge": "✅ 채택된 답변",
   "accept_button": "채택하기",
   "unaccept_button": "채택 해제",
-  "widget_has_accepted": "✅ 채택된 답변이 있습니다"
+  "widget_has_accepted": "✅ 채택된 답변이 있습니다",
+  "list_participants_header": "참여자",
+  "list_last_activity_header": "최근 활동"
 }

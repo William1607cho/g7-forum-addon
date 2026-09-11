@@ -5,11 +5,11 @@
         "ko": "포럼게시판 애드온",
         "en": "Forum Board Add-on"
     },
-    "version": "1.0.0",
+    "version": "1.1.0",
     "license": "MIT",
     "description": {
-        "ko": "sirsoft-board 게시판에 포럼형(forum) 유형을 더하고, 그 위에 추천·태그·멘션·구독·베스트답글·잠금 등 포럼 기능을 얹는 애드온입니다. sirsoft-board 와 템플릿(sirsoft-basic)은 전혀 수정하지 않으며, 애드온 전용 테이블·API·레이아웃 확장으로만 동작합니다. 이 버전(0.1.0-dev)은 이후 기능이 얹힐 뼈대만 포함합니다.",
-        "en": "Adds a forum-type board to sirsoft-board and layers forum features (reactions, tags, mentions, subscriptions, best answer, lock) on top. sirsoft-board and the sirsoft-basic template are never modified; the add-on works only through its own tables, API and layout extensions. This build (0.1.0-dev) is a scaffold that later features plug into."
+        "ko": "sirsoft-board 게시판에 포럼형(forum) 유형을 더하고, 그 위에 추천(리액션)·베스트답글(채택)·잠금·게시판 목록 참여자 표시 등 포럼 기능을 얹는 애드온입니다. sirsoft-board 와 템플릿(sirsoft-basic)은 전혀 수정하지 않으며, 애드온 전용 테이블·API·레이아웃 확장으로만 동작합니다. 태그·멘션·구독은 아직 미구현입니다.",
+        "en": "Adds a forum-type board to sirsoft-board and layers forum features (reactions, best answer/accepted reply, lock, board-list participant display) on top. sirsoft-board and the sirsoft-basic template are never modified; the add-on works only through its own tables, API and layout extensions. Tags, mentions and subscriptions are not implemented yet."
     },
     "g7_version": ">=7.0.10",
     "dependencies": {
@@ -17,7 +17,7 @@
             "sirsoft-board": ">=1.1.1"
         },
         "plugins": {
-            "g7-comment-editor": ">=1.0.0"
+            "g7-comment-editor": ">=1.1.0"
         }
     },
     "github_url": "https://github.com/William1607cho/g7-forum-addon",

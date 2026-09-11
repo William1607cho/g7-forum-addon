@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Plugins\G7\Forum\Addon\Http\Controllers\AcceptedReplyController;
+use Plugins\G7\Forum\Addon\Http\Controllers\ForumListMetaController;
 use Plugins\G7\Forum\Addon\Http\Controllers\PostLockController;
 use Plugins\G7\Forum\Addon\Http\Controllers\PostMetaController;
 use Plugins\G7\Forum\Addon\Http\Controllers\ReactionController;
@@ -52,3 +53,10 @@ Route::post('posts/{postId}/comments/{commentId}/unaccept', [AcceptedReplyContro
     ->whereNumber('postId')->whereNumber('commentId')
     ->middleware(['auth:sanctum', 'throttle:120,1'])
     ->name('accepted-reply.unaccept');
+
+// 게시판 목록 "참여자"/"최근 활동" 배치 조회 — 목록 화면이 한 페이지에 보이는 게시글
+// ID 들을 모아 한 번에 호출한다(N+1 방지). forum 유형이 아닌 게시판은 404. 게시글별
+// 가시성(비밀글/블라인드/삭제)은 컨트롤러가 배치용으로 재검증해 통과 못한 ID 만 제외한다.
+Route::get('boards/{slug}/list-meta', [ForumListMetaController::class, 'index'])
+    ->middleware(['optional.sanctum', 'throttle:300,1'])
+    ->name('boards.list-meta');

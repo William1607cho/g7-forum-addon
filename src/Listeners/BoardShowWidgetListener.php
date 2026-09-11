@@ -47,8 +47,42 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 댓글 채택(베스트답글) UI 노드의 안정 식별자 */
     private const ACCEPTED_REPLY_ID = 'g7_forum_addon_accepted_reply';
 
+    /** 위젯 영역의 채택된 답변 전문 박스 노드의 안정 식별자 */
+    private const ACCEPTED_REPLY_BOX_ID = 'g7_forum_addon_accepted_reply_box';
+
     /** `/meta` 데이터소스 id */
     private const META_DS_ID = 'forum_meta';
+
+    /**
+     * "답글이 있는 댓글" 행 가시성 `if`(sirsoft-basic 코어, 원본 그대로) — 답글은
+     * `_local.collapsedReplies[루트id] === false` 일 때만 보인다(기본값 undefined = 접힘).
+     * 구조적 시그니처로 앵커 식별에 쓴다(리터럴 일치, 3개 게시판 유형 분기 모두 동일).
+     */
+    private const REPLIES_ROW_IF_ORIGINAL = '{{(comment?.depth ?? 0) === 0 || (_local.collapsedReplies?.[$computed.commentRootMap?.[comment?.id]] === false)}}';
+
+    /** 위 `if` 를 forum 게시판일 때만 "기본값이 펼침"이 되도록 바꾼 버전(멱등 마커 겸용) */
+    private const REPLIES_ROW_IF_PATCHED = '{{(comment?.depth ?? 0) === 0 || !(_local.collapsedReplies?.[$computed.commentRootMap?.[comment?.id]] ?? (post?.data?.board?.type === \'forum\' ? false : true))}}';
+
+    /** "답글 보기 (N)" 토글 버튼의 `if`(sirsoft-basic 코어, 원본 그대로) — 앵커 식별용 */
+    private const REPLIES_TOGGLE_BUTTON_IF = '{{(comment?.replies_count ?? 0) > 0 && (comment?.depth ?? 0) === 0}}';
+
+    /** 토글 클릭 시 `_local.collapsedReplies` 갱신식(원본) */
+    private const REPLIES_TOGGLE_SETSTATE_ORIGINAL = '{{Object.assign({}, _local.collapsedReplies || {}, {[comment?.id]: !(_local.collapsedReplies?.[comment?.id] ?? true)})}}';
+
+    /** 위 갱신식을 forum 게시판일 때만 "기본값이 펼침"이 되도록 바꾼 버전 */
+    private const REPLIES_TOGGLE_SETSTATE_PATCHED = '{{Object.assign({}, _local.collapsedReplies || {}, {[comment?.id]: !(_local.collapsedReplies?.[comment?.id] ?? (post?.data?.board?.type === \'forum\' ? false : true))})}}';
+
+    /** 토글 아이콘 이름 표현식(원본) */
+    private const REPLIES_TOGGLE_ICON_ORIGINAL = '{{_local.collapsedReplies?.[comment?.id] === false ? \'chevron-up\' : \'chevron-down\'}}';
+
+    /** 위 아이콘 표현식의 forum 대응 버전 */
+    private const REPLIES_TOGGLE_ICON_PATCHED = '{{!(_local.collapsedReplies?.[comment?.id] ?? (post?.data?.board?.type === \'forum\' ? false : true)) ? \'chevron-up\' : \'chevron-down\'}}';
+
+    /** 토글 라벨 텍스트 표현식(원본) */
+    private const REPLIES_TOGGLE_LABEL_ORIGINAL = '{{_local.collapsedReplies?.[comment?.id] === false ? \'$t:board.hide_replies\' : \'$t:board.show_replies\'}} ({{comment?.replies_count}})';
+
+    /** 위 라벨 표현식의 forum 대응 버전 */
+    private const REPLIES_TOGGLE_LABEL_PATCHED = '{{!(_local.collapsedReplies?.[comment?.id] ?? (post?.data?.board?.type === \'forum\' ? false : true)) ? \'$t:board.hide_replies\' : \'$t:board.show_replies\'}} ({{comment?.replies_count}})';
 
     /** 리액션 종류 → 이모지 (순서 = 표시 순서, ReactionStore::REACTIONS 와 일치) */
     private const REACTION_EMOJI = [
@@ -141,7 +175,174 @@ class BoardShowWidgetListener implements HookListenerInterface
         // `/meta` 2-call 데이터소스 주입 (레이아웃당 1회). 위젯/잠금/리액션 UI 가 쓴다.
         $layout['data_sources'] = $this->withMetaDataSource($layout['data_sources'] ?? []);
 
+        // 댓글 삭제 성공 시 forum_meta 도 함께 갱신 — 채택된 답변이 삭제되면
+        // AcceptedReplyCleanupListener 가 DB 는 즉시 정리하지만, 프론트가 forum_meta 를
+        // 재조회하지 않으면 위젯의 채택 답변 박스가 새로고침 전까지 남아있는다.
+        // 공용 삭제 모달(sirsoft-basic 코어, board_delete_modal)의 onSuccess 체인에
+        // 이미 있는 `dataSourceId: post` 재조회 스텝을 구조적 시그니처로 찾아 그 옆에
+        // 스텝 하나를 추가한다 — 모달 자체를 새로 만들거나 코어 파일을 고치지 않는다(C-2).
+        // 주의: 삭제 모달은 `components` 가 아니라 레이아웃의 **별도 최상위 키인
+        // `modals`** 아래에 있다(컴포넌트 트리 밖) — 그래서 두 트리를 모두 순회한다.
+        $deleteRefetchApplied = 0;
+        $layout['components'] = $this->applyCommentDeleteMetaRefetch($layout['components'], $deleteRefetchApplied);
+        if (isset($layout['modals']) && is_array($layout['modals'])) {
+            $layout['modals'] = $this->applyCommentDeleteMetaRefetch($layout['modals'], $deleteRefetchApplied);
+        }
+
+        if ($deleteRefetchApplied === 0) {
+            Log::warning('[g7-forum-addon] 댓글 삭제 모달의 forum_meta 재조회 앵커(dataSourceId=post 재조회 스텝)를 찾지 못했습니다. 채택된 답변이 삭제되면 위젯 박스가 새로고침 전까지 남아있을 수 있습니다(백엔드 자동 해제 자체는 정상 동작).', [
+                'template_id' => $templateId,
+            ]);
+        }
+
+        // "답글 보기 (N)" 토글 기본 펼침(forum 전용) — sirsoft-basic 코어의 `_local.collapsedReplies`
+        // 삼항식 4곳(행 가시성·클릭 토글·아이콘·라벨)은 전부 "값 없으면 접힘"이 기본값이다.
+        // 서버 데이터(post.data.comments)에 의존하는 initActions 방식은 `post` 데이터소스가
+        // progressive(non-blocking)라 타이밍상 불가 — 대신 각 삼항식이 댓글 반복 렌더 시점에
+        // 평가된다는 점(이미 post.data 로딩 완료)을 이용해, "기본값 분기"만
+        // `post?.data?.board?.type === 'forum'` 조건으로 바꿔치기한다. 컴포넌트 트리 안에만
+        // 있음을 실측 확인(모달 같은 별도 최상위 키 없음).
+        $repliesApplied = 0;
+        $layout['components'] = $this->applyForumRepliesDefaultExpanded($layout['components'], $repliesApplied);
+
+        if ($repliesApplied === 0) {
+            Log::warning('[g7-forum-addon] board/show 답글 토글 앵커(collapsedReplies 삼항식)를 찾지 못해 forum 답글 기본 펼침을 적용하지 못했습니다. sirsoft-basic 레이아웃 구조 변경 여부 확인 필요.', [
+                'template_id' => $templateId,
+            ]);
+        }
+
         return $layout;
+    }
+
+    /**
+     * 댓글 트리를 재귀 순회하며 "답글 보기 (N)" 토글 관련 4개 표현식을 구조적
+     * 시그니처(리터럴 일치)로 찾아 forum 전용 기본-펼침 버전으로 치환한다. 이미
+     * 치환됐으면(멱등 — 원본 리터럴과 더 이상 일치하지 않음) 건드리지 않는다.
+     *
+     * @param  array<int, mixed>  $nodes
+     * @param  int  $applied  (참조) 적용 횟수
+     * @return array<int, mixed>
+     */
+    private function applyForumRepliesDefaultExpanded(array $nodes, int &$applied): array
+    {
+        $out = [];
+
+        foreach ($nodes as $node) {
+            if (is_array($node)) {
+                if (($node['if'] ?? null) === self::REPLIES_ROW_IF_ORIGINAL) {
+                    $node['if'] = self::REPLIES_ROW_IF_PATCHED;
+                    $applied++;
+                } elseif ($this->isRepliesToggleButton($node)) {
+                    $node['actions'][0]['params']['collapsedReplies'] = self::REPLIES_TOGGLE_SETSTATE_PATCHED;
+                    $node['children'][0]['props']['name'] = self::REPLIES_TOGGLE_ICON_PATCHED;
+                    $node['children'][1]['text'] = self::REPLIES_TOGGLE_LABEL_PATCHED;
+                    $applied++;
+                }
+
+                if (isset($node['children']) && is_array($node['children'])) {
+                    $node['children'] = $this->applyForumRepliesDefaultExpanded($node['children'], $applied);
+                }
+            }
+
+            $out[] = $node;
+        }
+
+        return $out;
+    }
+
+    /**
+     * 노드가 "답글 보기 (N)" 토글 버튼인지 형태로 판정.
+     *
+     * 신호: `if` 가 원본 리터럴과 일치 + `actions[0].params.collapsedReplies` 원본
+     * 리터럴 존재(이미 치환됐으면 더 이상 원본과 일치하지 않아 자연히 멱등).
+     */
+    private function isRepliesToggleButton(mixed $node): bool
+    {
+        if (! is_array($node)) {
+            return false;
+        }
+
+        if (($node['if'] ?? null) !== self::REPLIES_TOGGLE_BUTTON_IF) {
+            return false;
+        }
+
+        $current = $node['actions'][0]['params']['collapsedReplies'] ?? null;
+
+        return $current === self::REPLIES_TOGGLE_SETSTATE_ORIGINAL;
+    }
+
+    /**
+     * 컴포넌트 트리를 전체 재귀 순회(`children` 뿐 아니라 `actions`/`onSuccess` 등
+     * 모든 배열 값)하며 댓글 삭제 성공 액션 체인(`onSuccess`)을 찾아 패치한다.
+     *
+     * @param  array<int|string, mixed>  $nodes
+     * @param  int  $applied  (참조) 적용 횟수
+     * @return array<int|string, mixed>
+     */
+    private function applyCommentDeleteMetaRefetch(array $nodes, int &$applied): array
+    {
+        foreach ($nodes as $key => $value) {
+            if (! is_array($value)) {
+                continue;
+            }
+
+            if ($key === 'onSuccess' && array_is_list($value)) {
+                $nodes[$key] = $this->spliceForumMetaRefetchStep($value, $applied);
+
+                continue;
+            }
+
+            $nodes[$key] = $this->applyCommentDeleteMetaRefetch($value, $applied);
+        }
+
+        return $nodes;
+    }
+
+    /**
+     * `onSuccess` 스텝 배열에서 "댓글 삭제 시 게시글(post) 재조회" 스텝을 구조적
+     * 시그니처(handler=refetchDataSource + dataSourceId=post + if 에
+     * `deleteModal.type === 'comment'` 포함)로 찾아, 바로 뒤에 forum_meta 재조회
+     * 스텝을 추가한다. 이미 forum_meta 스텝이 있으면(멱등) 건드리지 않는다.
+     *
+     * @param  array<int, mixed>  $steps
+     * @return array<int, mixed>
+     */
+    private function spliceForumMetaRefetchStep(array $steps, int &$applied): array
+    {
+        foreach ($steps as $step) {
+            if (is_array($step) && ($step['params']['dataSourceId'] ?? null) === self::META_DS_ID) {
+                return $steps;
+            }
+        }
+
+        $insertAt = null;
+        foreach ($steps as $i => $step) {
+            if (
+                is_array($step)
+                && ($step['handler'] ?? null) === 'refetchDataSource'
+                && ($step['params']['dataSourceId'] ?? null) === 'post'
+                && str_contains((string) ($step['if'] ?? ''), "deleteModal.type === 'comment'")
+            ) {
+                $insertAt = $i;
+                break;
+            }
+        }
+
+        if ($insertAt === null) {
+            return $steps;
+        }
+
+        $newStep = [
+            'comment' => 'g7-forum-addon: 댓글 삭제 시 채택된 답변 등 포럼 메타도 함께 갱신(위젯 박스 즉시 반영)',
+            'if' => "{{_global.deleteModal.type === 'comment'}}",
+            'handler' => 'refetchDataSource',
+            'params' => ['dataSourceId' => self::META_DS_ID],
+        ];
+
+        array_splice($steps, $insertAt + 1, 0, [$newStep]);
+        $applied++;
+
+        return $steps;
     }
 
     /**
@@ -263,6 +464,90 @@ class BoardShowWidgetListener implements HookListenerInterface
                 $this->lockToggleButton(true),
                 // 게시글 리액션 바 (5종 이모지, 로그인 사용자 클릭 시 토글).
                 $this->reactionBar('post'),
+                // 채택된 답변 전문 박스 — forum_meta.data.accepted_reply 가 있을 때만.
+                // `w-full` 로 flex-wrap 컨테이너 안에서 강제 줄바꿈(새 행)시킨다.
+                $this->acceptedReplyBox(),
+            ],
+        ];
+    }
+
+    /**
+     * 채택된 답변 전문 박스.
+     *
+     * `forum_meta.data.accepted_reply` 가 있을 때만 렌더된다(없으면 = 채택 안 됨 또는
+     * 채택된 댓글이 삭제·블라인드 등으로 무효화됨 — `AcceptedReplyState::resolveForMeta()`
+     * 가 자기치유하므로 이 박스도 자동으로 사라진다, 별도 처리 불필요).
+     *
+     * 본문은 **`text` 바인딩으로 이스케이프해 렌더**한 뒤, g7-comment-editor 가 페이지
+     * 전역에서 이미 스캔하는 `p.text-gray-700.dark:text-gray-300`(빈 자식 + HTML-ish
+     * 여부 판정) 선택자에 **일부러 같은 클래스를 그대로 얹어** 그 기존 승격
+     * 파이프라인(`sanitizeCommentHtml` 재정화 → `innerHTML` 승격 → `enrichComment`
+     * 외부링크 렌더링)에 편승한다. 댓글 본문을 여기서 다시 안전하게 표시하려고
+     * 새 렌더링 경로(`HtmlContent` composite 의 `dangerouslySetInnerHTML`)를 만들면
+     * DB 원본을 검증 없이 그대로 주입하는 셈이 되어, 사이트 전체가 의존하는
+     * "표시할 때마다 재정화" 방어선을 이 박스만 우회하게 된다 — 그래서 일부러
+     * 기존 댓글과 완전히 같은 표시 경로를 태운다(새 코드 0, g7-comment-editor 무변경).
+     * 클래스 조합(`prose dark:prose-invert prose-sm max-w-none text-gray-700
+     * dark:text-gray-300`)은 이 템플릿(`_modal_privacy.json` 등)에 이미 리터럴로 존재해
+     * Tailwind 빌드 시점에 스캔된 조합만 골랐다(즉석 조합 시 CSS 미생성 함정 재발 방지).
+     *
+     * @return array<string, mixed>
+     */
+    private function acceptedReplyBox(): array
+    {
+        return [
+            'id' => self::ACCEPTED_REPLY_BOX_ID,
+            'type' => 'basic',
+            'name' => 'Div',
+            'if' => '{{!!forum_meta?.data?.accepted_reply}}',
+            'props' => [
+                // 초록 계열 고정값 — 다음 단계(색상 설정 UI)에서 여기 4개 클래스
+                // (bg-green-50/dark:bg-green-900/10/border-green-300/dark:border-green-700)
+                // 를 설정값 기반 동적 스타일로 교체 예정.
+                'className' => 'w-full mt-1 rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 p-3',
+            ],
+            'children' => [
+                [
+                    // 작성자 아이콘 + 이름 + 작성 시각.
+                    'type' => 'basic',
+                    'name' => 'Div',
+                    'props' => ['className' => 'flex items-center gap-2 mb-2'],
+                    'children' => [
+                        [
+                            'type' => 'composite',
+                            'name' => 'Avatar',
+                            'props' => [
+                                'author' => '{{forum_meta?.data?.accepted_reply?.author}}',
+                                'size' => 'xs',
+                            ],
+                        ],
+                        [
+                            'type' => 'basic',
+                            'name' => 'Span',
+                            'props' => ['className' => 'text-sm font-medium text-green-800 dark:text-green-300'],
+                            'text' => '{{forum_meta?.data?.accepted_reply?.author?.name ?? \'\'}}',
+                        ],
+                        [
+                            'type' => 'basic',
+                            'name' => 'Span',
+                            'props' => [
+                                'className' => 'text-xs text-green-600 dark:text-green-400',
+                                'title' => '{{forum_meta?.data?.accepted_reply?.created_at ?? \'\'}}',
+                            ],
+                            'text' => '{{forum_meta?.data?.accepted_reply?.created_at_formatted ?? \'\'}}',
+                        ],
+                    ],
+                ],
+                [
+                    // 본문 전문 — text 바인딩(이스케이프) + g7-comment-editor 기존 전역
+                    // 스캐너(class 조합이 앵커)가 재정화·승격을 전담. 새 렌더링 경로 없음.
+                    'type' => 'basic',
+                    'name' => 'P',
+                    'props' => [
+                        'className' => 'prose dark:prose-invert prose-sm max-w-none text-gray-700 dark:text-gray-300',
+                    ],
+                    'text' => '{{forum_meta?.data?.accepted_reply?.content ?? \'\'}}',
+                ],
             ],
         ];
     }
@@ -438,6 +723,7 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'tags' => [],
                     'subscribed' => false,
                     'accepted_reply_id' => null,
+                    'accepted_reply' => null,
                     'locked' => false,
                     'is_notice' => false,
                 ],

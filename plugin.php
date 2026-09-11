@@ -5,6 +5,7 @@ namespace Plugins\G7\Forum\Addon;
 use App\Extension\AbstractPlugin;
 use Illuminate\Support\Facades\DB;
 use Plugins\G7\Forum\Addon\Listeners\AcceptedReplyCleanupListener;
+use Plugins\G7\Forum\Addon\Listeners\BoardIndexWidgetListener;
 use Plugins\G7\Forum\Addon\Listeners\BoardShowWidgetListener;
 use Plugins\G7\Forum\Addon\Listeners\BoardTypeSeedListener;
 use Plugins\G7\Forum\Addon\Listeners\CommentLockGuardListener;
@@ -64,6 +65,10 @@ class Plugin extends AbstractPlugin
      *   달리는 것을 서버에서 거부한다(프론트 차단과 별개의 API 레벨 관문).
      * - AcceptedReplyCleanupListener: `sirsoft-board.comment.after_delete` 액션에 붙어, 삭제된
      *   댓글이 그 게시글의 채택 답글이면 `accepted_reply_id` 를 null 로 되돌린다(고아 참조 방지).
+     * - BoardIndexWidgetListener: `core.layout_extension.after_apply` 필터에 붙어, `board/index`
+     *   (게시판 목록) 레이아웃에 "참여자" 컬럼을 추가하고 "작성일" 컬럼을 forum 게시판에
+     *   한해 "최근 활동"으로 표시한다(정렬 기준 변경은 범위 밖 — sirsoft-board 에 정렬
+     *   개입 훅이 없어 페이지네이션까지 정확히 구현할 방법이 없다고 확인됨).
      *
      * @return array<int, class-string>
      */
@@ -72,6 +77,7 @@ class Plugin extends AbstractPlugin
         return [
             BoardTypeSeedListener::class,
             BoardShowWidgetListener::class,
+            BoardIndexWidgetListener::class,
             CommentLockGuardListener::class,
             AcceptedReplyCleanupListener::class,
         ];
