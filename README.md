@@ -1,5 +1,8 @@
 # g7-forum-addon
 
+[![Release](https://img.shields.io/github/v/release/William1607cho/g7-forum-addon?sort=semver)](https://github.com/William1607cho/g7-forum-addon/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 A [Gnuboard7](https://sir.kr/) plugin that adds a **forum-type board** to
 `sirsoft-board` and layers forum features on top of it — pinned posts, best-answer
 acceptance, thread locking, emoji reactions — plus the plumbing (reply targeting,
