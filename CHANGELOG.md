@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-17
+
+### Security
+
+- **Board read permission is now enforced on every add-on endpoint.** The
+  visibility guard checked existence, board active state, blinded/deleted status
+  and secret posts, but never the board's own read permission
+  (`sirsoft-board.{slug}.posts.read`). As a result a guest could call
+  `GET /posts/{id}/meta` on a post in a board they cannot read and get `200`
+  (post existence, pin/lock flags, reaction counts and — on a forum board — the
+  accepted answer's content and author). The guard now performs the same check
+  `sirsoft-board`'s route middleware does, before the blinded/secret checks, and
+  answers the same way: **`401` for guests, `403` for signed-in users** (never
+  `401` to a signed-in user, which the front-end would treat as an expired
+  session). This applies to `/meta`, lock/unlock, reactions and
+  accept/unaccept, which all share the guard.
+
+### Fixed
+
+- `GET /boards/{slug}/list-meta` now applies the same board read-permission check
+  (guest `401` / member `403`). Previously a forum board without guest read
+  access would still return participants and last-activity times.
+- Unchanged: missing posts / inactive boards stay `404`, and secret posts stay
+  author-only (`403` for everyone else).
+
 ## [1.1.0] - 2026-09-11
 
 ### Added

@@ -35,8 +35,10 @@ sorting the board list by last activity (see Known issues).
 ## API
 
 All endpoints re-check visibility with the same rules `sirsoft-board` applies
-(secret / blinded / deleted / board active) and gate on the board being a
-`forum` type.
+(board read permission / secret / blinded / deleted / board active) and gate on
+the board being a `forum` type. Without the board's `posts.read` permission a
+guest gets `401` and a signed-in user `403`, exactly like `sirsoft-board`'s own
+post API (since 1.1.1).
 
 | Method / path | Auth | Notes |
 |---|---|---|
@@ -44,7 +46,7 @@ All endpoints re-check visibility with the same rules `sirsoft-board` applies
 | `POST /api/plugins/g7-forum-addon/posts/{id}/lock` · `/unlock` | admin | Site admin only. |
 | `POST /api/plugins/g7-forum-addon/{targetType}/{id}/reactions` | sanctum | `targetType` ∈ `posts` \| `comments`, body `{ reaction }`. One toggle endpoint for add / swap / remove. |
 | `POST /api/plugins/g7-forum-addon/posts/{postId}/comments/{commentId}/accept` · `/unaccept` | sanctum | Post author or site admin. |
-| `GET  /api/plugins/g7-forum-addon/boards/{slug}/list-meta?post_ids=...` *(new in 1.1.0)* | optional | Batched participants + last-activity for a page of board-list rows. 404 on non-forum boards; re-checks per-post visibility. |
+| `GET  /api/plugins/g7-forum-addon/boards/{slug}/list-meta?post_ids=...` *(new in 1.1.0)* | optional | Batched participants + last-activity for a page of board-list rows. 404 on non-forum boards; `401` / `403` without board read permission (1.1.1); re-checks per-post visibility. |
 
 ## How the front-end works
 
