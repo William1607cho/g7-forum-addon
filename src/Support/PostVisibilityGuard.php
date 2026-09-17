@@ -2,6 +2,9 @@
 
 namespace Plugins\G7\Forum\Addon\Support;
 
+use App\Helpers\PermissionHelper;
+use App\Helpers\ResponseHelper;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -14,11 +17,13 @@ use Illuminate\Support\Facades\DB;
  * 추론하는 우회 채널이 된다(설계문서 §4). 그래서 게시글을 실제로 조회하고, sirsoft-board
  * 가 적용하는 것과 같은 조건으로 열람 가능 여부를 먼저 판정한다.
  *
- * 이 빌드(0.1.0-dev, 뼈대)의 판정 범위:
- *  - 존재/소프트삭제/게시판 활성 : 완전 반영
+ * 판정 범위:
+ *  - 존재/소프트삭제/게시판 활성 : 완전 반영 (404)
+ *  - 게시판별 읽기 권한(ACL)      : `sirsoft-board.{slug}.posts.read` — sirsoft-board 라우트의
+ *                                  permission 미들웨어와 같은 판정·같은 순서·같은 응답
+ *                                  (비회원 401 / 권한 없는 회원 403). 1.1.1 에서 추가.
  *  - status = blinded / deleted  : 작성자 본인만 통과 (매니저 권한 경로는 TODO)
  *  - is_secret                   : 작성자 본인만 통과 (로그인+게시판권한/비번검증 토큰 경로는 TODO)
- *  - 게시판별 읽기 권한(ACL)      : is_active 로만 갈음 (per-board 권한 검사는 TODO)
  *
  * TODO 표시 지점은 각 포럼 기능이 실제 데이터를 붙이기 전에 sirsoft-board 의 PostResource/
  * CommentResource 가 쓰는 `canViewSecretForPost` 등가 로직으로 채운다.
@@ -45,6 +50,9 @@ class PostVisibilityGuard
             abort(404, 'Post not found.');
         }
 
+        // 게시판 읽기 권한 — 블라인드/비밀글보다 먼저 (sirsoft-board 는 미들웨어에서 먼저 막는다).
+        $this->assertBoardReadable($request, $board);
+
         $userId = $request->user()?->id;
         $isAuthor = $userId !== null && (int) $post->user_id === (int) $userId;
 
@@ -58,9 +66,35 @@ class PostVisibilityGuard
             abort(403, 'This post is secret.');
         }
 
-        // 게시판별 읽기 권한(ACL) — 뼈대에서는 is_active 로만 갈음. per-board 권한 검사 TODO.
-
         return (object) ['post' => $post, 'board' => $board];
+    }
+
+    /**
+     * 요청자가 게시판 글 읽기 권한(`sirsoft-board.{slug}.posts.read`)을 가졌는지 확인하고,
+     * 없으면 sirsoft-board 의 PermissionMiddleware 와 같은 응답으로 중단한다.
+     *
+     * - 비회원: 401 `auth.guest_permission_denied`
+     * - 회원  : 403 `auth.permission_denied` — 회원에게 401 을 주면 프론트 ApiClient 가
+     *           토큰 만료로 보고 강제 로그아웃하므로 반드시 403 이어야 한다.
+     *
+     * @param  object  $board  boards 행 (slug 필요)
+     */
+    public function assertBoardReadable(Request $request, object $board): void
+    {
+        $ability = "sirsoft-board.{$board->slug}.posts.read";
+        $user = $request->user();
+
+        if (PermissionHelper::check($ability, $user)) {
+            return;
+        }
+
+        $params = ['required_permissions' => $ability];
+
+        throw new HttpResponseException(
+            $user === null
+                ? ResponseHelper::unauthorized('auth.guest_permission_denied', $params)
+                : ResponseHelper::forbidden('auth.permission_denied', $params)
+        );
     }
 
     /**
