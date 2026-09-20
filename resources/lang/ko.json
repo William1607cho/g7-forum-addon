@@ -1,5 +1,4 @@
 {
-  "pinned_badge": "고정됨",
   "locked_badge": "잠김",
   "pin_button": "공지로 고정",
   "unpin_button": "고정 해제",
@@ -8,12 +7,11 @@
   "locked_comment_notice": "🔒 잠긴 게시글입니다. 새 댓글을 작성할 수 없습니다.",
   "reaction_up": "추천",
   "reaction_down": "비추천",
-  "accepted_badge": "채택됨",
   "accept_button": "답변 채택",
   "unaccept_button": "채택 취소",
-  "widget_has_accepted": "채택된 답변 있음",
   "list_participants_header": "참여자",
   "list_last_activity_header": "최근 활동",
   "self_vote_blocked": "본인 글에는 추천할 수 없습니다",
-  "login_required_to_vote": "로그인 후 추천할 수 있습니다"
+  "login_required_to_vote": "로그인 후 추천할 수 있습니다",
+  "view_accepted_answer": "채택된 답변 보기"
 }

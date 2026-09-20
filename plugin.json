@@ -5,7 +5,7 @@
         "ko": "포럼게시판 애드온",
         "en": "Forum Board Add-on"
     },
-    "version": "1.3.0",
+    "version": "1.4.0",
     "license": "MIT",
     "description": {
         "ko": "sirsoft-board 게시판에 포럼형(forum) 유형을 더하고, 그 위에 추천(업·다운)·베스트답글(채택)·글 고정(핀)·잠금·게시판 목록 참여자 표시 등 포럼 기능을 얹는 애드온입니다. sirsoft-board 와 템플릿(sirsoft-basic)은 전혀 수정하지 않으며, 애드온 전용 테이블·API·레이아웃 확장으로만 동작합니다. 글 고정은 애드온이 따로 저장하지 않고 코어 공지 값(board_posts.is_notice)을 그대로 씁니다. 태그·멘션·구독은 아직 미구현입니다.",

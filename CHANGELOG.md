@@ -5,6 +5,49 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **State is carried by button colour, not by a row of word badges.** "Pinned"
+  and "This thread has an accepted answer" are gone from the post widget, and
+  "Accepted" is gone from under each comment. A pinned post shows a filled
+  megaphone; an accepted answer shows a trophy. The badge container went with
+  them — with a single badge left it sat empty most of the time and still cost a
+  `gap`.
+
+  **"Locked" stays.** It is the one state a reader needs and cannot otherwise
+  see: the lock button is only rendered for board managers. It now sits directly
+  in the button row rather than in a wrapper, so it leaves no gap when absent.
+
+- **One orange for every "on" state.** Pin, lock and accept were blue, grey and
+  green — three colours for the same idea on one row. They are now all
+  `orange-700`, which sits at the same lightness as the blue it replaces
+  (oklch 55.3% vs 54.6%), so the buttons keep their visual weight and a white
+  icon keeps its contrast. Dark mode uses `orange-600`, one step lighter, because
+  700 sinks into a dark background. `orange-800`/`900` were available and darker
+  but read brown rather than orange.
+
+  The accepted comment's row highlight moved to the same family and stays a
+  **background tone** — border plus `orange-50` (light) / `orange-900/20` (dark),
+  with the body text untouched, so the comment is still comfortable to read.
+
+- **The comment's accept button says which state it is in.** Before accepting it
+  is a check; once accepted the same button becomes a filled orange **trophy**.
+  Who may accept, and what accepting does, are unchanged.
+
+### Added
+
+- **A trophy button on the post jumps to the accepted answer.** It appears only
+  when an answer has been accepted, and it is shown to **everyone** — it takes
+  over from the badge that used to say so. Clicking it scrolls to that comment.
+
+  The jump is pure screen behaviour: the core `replaceUrl` action with a `scroll`
+  selector, which rewrites the address with `history.replaceState` and refetches
+  nothing and remounts nothing. No endpoint is called and no permission is
+  consulted. The target is a DOM id the add-on now puts on every comment row
+  while it applies the accepted-answer highlight.
+
 ## [1.3.0] - 2026-09-20
 
 ### Added

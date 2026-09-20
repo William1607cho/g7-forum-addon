@@ -86,9 +86,9 @@ class WidgetLayoutTest extends PluginTestCase
     {
         // 템플릿(wc-community)의 Font Awesome 은 Solid 전용 서브셋이라 목록에 없는
         // 이름은 오류 없이 빈칸으로 렌더된다. 여기 적힌 이름만 쓴다.
-        $allowed = ['chevron-up', 'chevron-down', 'bullhorn', 'lock', 'circle-check'];
+        $allowed = ['chevron-up', 'chevron-down', 'bullhorn', 'lock', 'circle-check', 'trophy'];
 
-        foreach (['widgetNode', 'commentReactionBarNode', 'acceptedReplyNode'] as $method) {
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
             foreach ($this->flatten($this->node($method)) as $n) {
                 if (($n['name'] ?? null) !== 'Icon') {
                     continue;
@@ -130,7 +130,7 @@ class WidgetLayoutTest extends PluginTestCase
     {
         // `$t:` 를 PHP 이중따옴표 안에서 이어 붙이면 `$t` 가 변수로 보간돼 조용히
         // `:g7-forum-addon.…` 이 된다. 실제로 한 번 그렇게 깨졌다.
-        foreach (['widgetNode', 'commentReactionBarNode', 'acceptedReplyNode'] as $method) {
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
             $json = json_encode($this->node($method), JSON_UNESCAPED_UNICODE);
 
             $this->assertStringNotContainsString("':g7-forum-addon.", $json, $method);
@@ -225,27 +225,104 @@ class WidgetLayoutTest extends PluginTestCase
 
     // ── 채택 버튼 이동 ───────────────────────────────────────
 
-    public function test_accept_toggle_lives_in_the_comment_bar_not_the_badge_row(): void
+    public function test_accept_toggle_lives_in_the_comment_bar(): void
     {
-        $bar = $this->node('commentReactionBarNode');
-        $badgeRow = $this->node('acceptedReplyNode');
-
         // 추천 2개 + 채택/채택취소 2개
-        $this->assertCount(4, $this->buttons($bar));
-        // "채택됨" 표시 줄에는 버튼이 없다.
-        $this->assertCount(0, $this->buttons($badgeRow));
+        $this->assertCount(4, $this->buttons($this->node('commentReactionBarNode')));
     }
 
-    public function test_accepted_state_toggle_is_filled_green_and_reports_aria_pressed(): void
+    // ── 1.4.0 배지 제거·주황·트로피 ───────────────────────────
+
+    public function test_no_text_badge_remains_except_the_locked_one(): void
     {
-        $accepted = null;
-        foreach ($this->buttons($this->node('commentReactionBarNode')) as $button) {
-            if (($button['props']['aria-pressed'] ?? null) === 'true'
-                && str_contains((string) ($button['props']['className'] ?? ''), 'bg-green-600')) {
-                $accepted = $button;
+        $texts = [];
+        foreach ($this->flatten($this->node('widgetNode')) as $n) {
+            if (($n['name'] ?? null) === 'Span' && is_string($n['text'] ?? null)) {
+                $texts[] = $n['text'];
+            }
+        }
+        $json = json_encode($this->node('commentReactionBarNode'), JSON_UNESCAPED_UNICODE);
+
+        // 없앤 배지 키는 어디에도 남지 않는다.
+        foreach (['pinned_badge', 'accepted_badge', 'widget_has_accepted'] as $gone) {
+            $this->assertStringNotContainsString($gone, implode('|', $texts), $gone);
+            $this->assertStringNotContainsString($gone, $json, $gone);
+        }
+
+        // 잠김 배지는 남는다 — 잠금 버튼은 관리자급에게만 보이기 때문이다.
+        $this->assertContains('$t:g7-forum-addon.locked_badge', $texts);
+    }
+
+    public function test_every_on_state_fill_is_the_same_orange(): void
+    {
+        $filled = 0;
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
+            foreach ($this->buttons($this->node($method)) as $button) {
+                $class = (string) ($button['props']['className'] ?? '');
+                if (! str_contains($class, 'bg-orange-700')) {
+                    continue;
+                }
+                $filled++;
+                // 파랑·회색·초록 채움이 남아 있으면 안 된다.
+                foreach (['bg-blue-600', 'bg-gray-600', 'bg-green-600'] as $old) {
+                    $this->assertStringNotContainsString($old, $class, $method);
+                }
             }
         }
 
-        $this->assertNotNull($accepted, '채택된 상태의 토글이 초록으로 채워져야 한다');
+        // 고정해제 · 잠금해제 · 채택취소 · 채택답변보기 = 4개
+        $this->assertSame(4, $filled);
+    }
+
+    public function test_accepted_comment_toggle_switches_check_to_trophy(): void
+    {
+        $icons = [];
+        foreach ($this->buttons($this->node('commentReactionBarNode')) as $button) {
+            $pressed = $button['props']['aria-pressed'] ?? null;
+            foreach ($button['children'] ?? [] as $child) {
+                if (is_array($child) && ($child['name'] ?? null) === 'Icon') {
+                    $icons[] = [$pressed, $child['props']['name'] ?? ''];
+                }
+            }
+        }
+
+        $this->assertContains([null, 'circle-check'], $icons, '미채택은 체크 아이콘');
+        $this->assertContains(['true', 'trophy'], $icons, '채택되면 트로피 아이콘');
+    }
+
+    public function test_post_trophy_button_only_shows_when_an_answer_is_accepted(): void
+    {
+        $trophy = null;
+        foreach ($this->buttons($this->node('widgetNode')) as $button) {
+            foreach ($button['children'] ?? [] as $child) {
+                if (is_array($child) && ($child['props']['name'] ?? null) === 'trophy') {
+                    $trophy = $button;
+                }
+            }
+        }
+
+        $this->assertNotNull($trophy, '본글에 트로피 버튼이 있어야 한다');
+        $this->assertSame('{{!!forum_meta?.data?.accepted_reply_id}}', $trophy['if'] ?? null);
+
+        // 권한 게이트가 붙으면 안 된다 — 모두에게 보이는 버튼이다.
+        $this->assertStringNotContainsString('can_manage', (string) ($trophy['if'] ?? ''));
+    }
+
+    public function test_post_trophy_navigates_by_scrolling_not_by_calling_the_api(): void
+    {
+        $trophy = null;
+        foreach ($this->buttons($this->node('widgetNode')) as $button) {
+            foreach ($button['children'] ?? [] as $child) {
+                if (is_array($child) && ($child['props']['name'] ?? null) === 'trophy') {
+                    $trophy = $button;
+                }
+            }
+        }
+
+        $action = $trophy['actions'][0] ?? [];
+        $this->assertSame('replaceUrl', $action['handler'] ?? null);
+        $this->assertStringStartsWith('#g7fa-comment-', (string) ($action['params']['scroll'] ?? ''));
+        // API 호출이 아니다.
+        $this->assertNotSame('apiCall', $action['handler'] ?? null);
     }
 }

@@ -2,7 +2,7 @@
     "name": "plugins/g7-forum-addon",
     "description": "Forum board add-on for Gnuboard7 — adds a forum-type board to sirsoft-board and layers forum features on top, without modifying sirsoft-board or the template.",
     "type": "library",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "license": "MIT",
     "authors": [
         {
