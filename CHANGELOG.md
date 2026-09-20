@@ -65,6 +65,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   widget. Site administrators keep the ability: the admin role is granted every
   leaf permission, `{slug}.manager` included.
 
+- **The widget is no longer a dashed blue box, and its controls are one row of
+  equal squares.** The dashed border and blue tint are gone (the spacing stays),
+  and everything the widget offers now sits on a single row: the up/down votes on
+  the left, the status badges beside them, and the pin and lock toggles pinned to
+  the right edge. The accepted-answer content box moved below that row.
+
+  All four buttons are the same 40px square (`w-10 h-10`). The votes stack a
+  direction icon over their count; pin and lock show only an icon and carry their
+  name in `title` and `aria-label`. A toggle that is **on** is filled rather than
+  outlined — `lock-open` is not in the template's icon subset, so state cannot be
+  shown by shape — and reports it through `aria-pressed`. The author's own vote
+  buttons stay disabled rather than hidden, as before.
+
+  The row does not wrap: only the badge group between the votes and the toggles
+  is allowed to wrap or shrink, so the four buttons stay on one line at phone
+  width.
+
+  **Icon substitutions.** The template ships a Solid-only Font Awesome subset and
+  an unknown name renders as a blank glyph with no error, so only names present
+  in that subset are used: `chevron-up` / `chevron-down` for the votes (the
+  subset has no `caret-*`) and `bullhorn` for the pin (no `thumbtack`; the pin
+  drives the core notice flag, so a megaphone is not a stretch). Lock keeps
+  `lock`. The template itself is untouched.
+
+- **The accepted answer now stands out as a whole comment.** Previously only a
+  small badge under the comment body said so. The accepted comment's own row now
+  gets a green border and tint that reads in both light and dark mode, and the
+  badge itself became an explicit "Accepted" mark with a check icon, shown to
+  everyone rather than only to those who can change it.
+
+  The highlight is applied the same way as every other change this plugin makes
+  to the page — by rewriting the `className` of the comment row container in the
+  layout tree that `core.layout_extension.after_apply` hands over. No template
+  file is modified, and the container's own `style` (the depth indent) is left
+  alone. Rows that are not accepted get a transparent border of the same width so
+  nothing shifts when the highlight appears.
+
 ### Fixed
 
 - **The widget is no longer empty on a secret post for people who can read it.**

@@ -49,6 +49,47 @@ post API (since 1.1.1).
 | `POST /api/plugins/g7-forum-addon/posts/{postId}/comments/{commentId}/accept` · `/unaccept` | sanctum | Post author or site admin. |
 | `GET  /api/plugins/g7-forum-addon/boards/{slug}/list-meta?post_ids=...` *(new in 1.1.0)* | optional | Batched participants + last-activity for a page of board-list rows. 404 on non-forum boards; `401` / `403` without board read permission (1.1.1); re-checks per-post visibility. |
 
+## Widget layout (1.3.0)
+
+```
+┌ post body ────────────────────────────────────────────────┐
+│ …                                                         │
+│                                                           │
+│  [▲ 3] [▼ 0]   Pinned  Locked  Has an accepted answer   [📢] [🔒] │
+│                                                           │
+│  ┌ accepted answer ─────────────────────────────────────┐ │
+│  │ avatar · name · time                                 │ │
+│  │ body…                                                │ │
+│  └──────────────────────────────────────────────────────┘ │
+├───────────────────────────────────────────────────────────┤
+│                        Reply  Report  Edit  Delete        │
+└───────────────────────────────────────────────────────────┘
+```
+
+- **No box.** There is no border or background around the widget, only spacing.
+- **One row.** Votes on the left, status badges next to them, pin and lock at the
+  right edge. The row never wraps — only the badge group may wrap or shrink — so
+  the four buttons stay on one line at phone width.
+- **Equal squares.** Every button is `w-10 h-10` (40px). Votes stack an icon over
+  their count; pin and lock are icon-only and name themselves through `title` and
+  `aria-label`. An active toggle is filled and sets `aria-pressed`.
+
+### Icons
+
+The visitor template (`wc-community`) ships a **Solid-only Font Awesome subset**,
+and a name that is not in it renders as a blank glyph with no error. Only names
+present in the deployed subset are used:
+
+| Use | Icon | Note |
+|---|---|---|
+| Upvote / downvote | `chevron-up` / `chevron-down` | the subset has no `caret-*` |
+| Pin | `bullhorn` | no `thumbtack`; a pin here *is* the core notice flag |
+| Lock (both states) | `lock` | no `lock-open` / `unlock` — state is shown by fill, not shape |
+| Accepted mark | `circle-check` | |
+
+If you run this plugin on a template with the full Font Awesome, swapping these
+names is a one-line change per icon in `BoardShowWidgetListener`.
+
 ## How the front-end works
 
 `BoardShowWidgetListener` subscribes to `core.layout_extension.after_apply` and,
@@ -69,6 +110,10 @@ on `board/show` only, transforms the fully-composed layout tree:
   spliced right after each rendered comment body `<P>`. Both counts are always
   shown, including `0`. For the author the buttons are **disabled rather than
   hidden**, so the author can still read the counts.
+- **Accepted-answer highlight** *(1.3.0)*: the accepted comment's row container
+  gets a conditional `className` so the whole comment is outlined and tinted
+  green. This rewrites a class string in the composed tree — the template file is
+  not touched, and the container's own `style` (the depth indent) is preserved.
 - **Best answer:** a "✅ Accepted answer" badge + Accept / Unaccept buttons (author
   or admin only) spliced after each comment body, plus a full accepted-answer
   content box (avatar, name, timestamp, formatted body — see Features) in the
@@ -259,6 +304,21 @@ other Gnuboard7 plugins.)
   각각 숫자로 표시하며 0 도 숨기지 않습니다(순점수는 만들지 않습니다). 로그인 사용자만이고,
   **자기 글·자기 댓글에는 투표할 수 없습니다**(서버 403, 화면은 버튼 비활성 — 감추면
   작성자만 자기 글의 점수를 못 보게 되므로). 스키마 변경도 마이그레이션도 없습니다.
+- **위젯 모양** *(1.3.0)*: 위젯을 감싸던 파란 점선 상자를 없애고(여백은 유지), 조작을 한 줄에
+  모았습니다 — 왼쪽에 추천 업·다운, 그 옆에 상태 배지, 오른쪽 끝에 고정·잠금. 버튼 4개는
+  모두 같은 40px 정사각(`w-10 h-10`)이고, 좁은 화면에서도 한 줄을 지킵니다(배지 묶음만
+  줄바꿈·축소를 허용). 고정·잠금은 아이콘만 두고 이름은 `title`·`aria-label` 로 제공하며,
+  켜진 상태는 채운 색과 `aria-pressed` 로 나타냅니다.
+  - **아이콘 대체**: 템플릿의 Font Awesome 은 Solid 전용 서브셋이라 목록에 없는 이름은
+    오류 없이 빈칸으로 렌더됩니다. 그래서 서브셋에 있는 이름만 씁니다 —
+    업·다운 `chevron-up`/`chevron-down`(`caret-*` 없음), 고정 `bullhorn`(`thumbtack` 없음;
+    이 기능의 실체가 코어 공지라 뜻이 어긋나지 않습니다), 잠금 `lock`(`lock-open` 이 없어
+    상태는 모양이 아니라 색으로 구분). **템플릿은 수정하지 않습니다.**
+- **채택 답변 강조** *(1.3.0)*: 채택된 댓글은 행 전체에 초록 테두리·배경이 들어가고,
+  "채택됨" 표시가 권한과 무관하게 모두에게 보입니다. 다크 모드에서도 같은 계열로 읽힙니다.
+  강조는 `after_apply` 가 넘겨준 트리에서 댓글 행 컨테이너의 `className` 만 바꾸는
+  방식이라 템플릿 파일을 건드리지 않고, 컨테이너의 `style`(댓글 깊이 들여쓰기)도 그대로
+  둡니다. 채택이 아닌 행에는 같은 두께의 투명 테두리를 깔아 강조가 켜질 때 밀리지 않습니다.
 - **베스트답글**: 글 작성자(또는 사이트 관리자 — 1.3.0 에서 바뀌지 않음)가 댓글 하나를 "채택된 답변"으로 지정.
   답글(대댓글)도 가능, 게시글당 1개, 채택 댓글 삭제 시 자동 해제.
 - **채택된 답변 전문 표시** *(1.1.0 신규)*: 위젯에 채택된 답변의 서식 포함 전문(굵게·목록·
