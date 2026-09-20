@@ -24,7 +24,6 @@ filter hook, which splices widgets into the final `board/show` layout tree.
 | **Thread lock** | A **board manager** can lock / unlock a forum post (site-admin-only until 1.3.0). A locked thread rejects new comments and replies **on the server** (two `sirsoft-board.comment.*` filter hooks), and the visitor page replaces the comment form with a "🔒 locked" notice. |
 | **Up / down votes** *(replaces emoji reactions in 1.3.0)* | Two votes — `up` and `down` — on **posts and comments**, shown as two separate counts. One vote per user per target: clicking the other side switches, clicking the same side cancels (enforced by a DB unique constraint). Logged-in users only, and **not on your own post or comment**. |
 | **Best answer** | The post author (or a site admin — unchanged in 1.3.0) marks one comment — top-level or a reply — as the accepted answer. One per post; re-accepting swaps it. Auto-cleared if the accepted comment is deleted. |
-| **Accepted-answer content box** *(new in 1.1.0)* | The widget shows the accepted answer's full formatted content (bold, lists, block quotes, tables) with the author's avatar, name and timestamp — not just a "there is an accepted answer" line. Renders through the same escape-then-client-sanitize pipeline as ordinary comments, so it inherits `g7-comment-editor`'s existing XSS defense rather than opening a new one. |
 | **Board-list participants + last activity** *(new in 1.1.0)* | The board index page gets a "Participants" column (avatar stack, up to 5 recent commenters) and, on forum boards, relabels "Created" to "Last activity" with the most recent comment/post time. One batched, N+1-free query per page. |
 | **Forum boards are always sorted by last activity** *(new in 1.2.0)* | On `forum` boards the post list is ordered by **last activity, newest first** — server-side, before pagination — so a thread that just got a comment returns to the top of page 1. **This overrides `sort_by` / `sort_order` and the board's own default ordering**; on a forum board, recent activity is the premise of the screen rather than one sort option among several. Other board types are untouched. See [Behaviour to be aware of](#behaviour-to-be-aware-of). |
 | **Replies default-expanded on forum boards** *(new in 1.1.0)* | A comment's reply thread starts expanded on forum boards (still collapsed by default everywhere else); the "N replies" toggle keeps working normally in both directions. |
@@ -49,30 +48,31 @@ post API (since 1.1.1).
 | `POST /api/plugins/g7-forum-addon/posts/{postId}/comments/{commentId}/accept` · `/unaccept` | sanctum | Post author or site admin. |
 | `GET  /api/plugins/g7-forum-addon/boards/{slug}/list-meta?post_ids=...` *(new in 1.1.0)* | optional | Batched participants + last-activity for a page of board-list rows. 404 on non-forum boards; `401` / `403` without board read permission (1.1.1); re-checks per-post visibility. |
 
-## Widget layout (1.3.0)
+## Widget layout (1.4.0)
 
 ```
 ┌ post body ────────────────────────────────────────────────┐
 │ …                                                         │
 │                                                           │
-│  [▲ 3] [▼ 0]   Pinned  Locked  Has an accepted answer   [📢] [🔒] │
-│                                                           │
-│  ┌ accepted answer ─────────────────────────────────────┐ │
-│  │ avatar · name · time                                 │ │
-│  │ body…                                                │ │
-│  └──────────────────────────────────────────────────────┘ │
+│  [▲ 3] [▼ 0]   Locked                          [🏆] [📢] [🔒] │
 ├───────────────────────────────────────────────────────────┤
 │                        Reply  Report  Edit  Delete        │
 └───────────────────────────────────────────────────────────┘
 ```
 
 - **No box.** There is no border or background around the widget, only spacing.
-- **One row.** Votes on the left, status badges next to them, pin and lock at the
-  right edge. The row never wraps — only the badge group may wrap or shrink — so
-  the four buttons stay on one line at phone width.
+- **One row, and that is the whole widget.** Votes on the left, the "Locked"
+  badge next to them, trophy / pin / lock at the right edge. The row never wraps,
+  so the buttons stay on one line at phone width.
 - **Equal squares.** Every button is `w-10 h-10` (40px). Votes stack an icon over
-  their count; pin and lock are icon-only. An active toggle is filled and sets
-  `aria-pressed`.
+  their count; the rest are icon-only. An active toggle is **filled orange**
+  (`orange-700`, `orange-600` in dark mode) and sets `aria-pressed` — pin, lock
+  and accept all use the same fill, so one colour means "on" everywhere.
+- **No word badges.** State is read from the buttons. The one exception is
+  "Locked", which stays because the lock button is only rendered for managers and
+  a reader would otherwise have no sign.
+- **A trophy on the post** appears when an answer has been accepted — shown to
+  everyone — and scrolls to that comment when clicked.
 - **Tooltips.** Every button — in the widget and under each comment — shows its
   name on hover, immediately. This is a drawn tooltip (`group-hover:` on the
   button), not the browser's `title`, which waits about a second; `title` is not
@@ -95,7 +95,8 @@ present in the deployed subset are used:
 | Upvote / downvote | `chevron-up` / `chevron-down` | the subset has no `caret-*` |
 | Pin | `bullhorn` | no `thumbtack`; a pin here *is* the core notice flag |
 | Lock (both states) | `lock` | no `lock-open` / `unlock` — state is shown by fill, not shape |
-| Accept / unaccept, accepted mark | `circle-check` | |
+| Accept (not yet accepted) | `circle-check` | |
+| Accepted / jump to accepted answer | `trophy` | the subset's only trophy-family name besides `star`, which reads as a rating |
 
 If you run this plugin on a template with the full Font Awesome, swapping these
 names is a one-line change per icon in `BoardShowWidgetListener`.
@@ -120,14 +121,15 @@ on `board/show` only, transforms the fully-composed layout tree:
   spliced right after each rendered comment body `<P>`. Both counts are always
   shown, including `0`. For the author the buttons are **disabled rather than
   hidden**, so the author can still read the counts.
-- **Accepted-answer highlight** *(1.3.0)*: the accepted comment's row container
-  gets a conditional `className` so the whole comment is outlined and tinted
-  green. This rewrites a class string in the composed tree — the template file is
-  not touched, and the container's own `style` (the depth indent) is preserved.
+- **Accepted-answer highlight**: the accepted comment's row container gets a
+  conditional `className` so the whole comment is outlined and tinted orange
+  (*green until 1.3.0*). This rewrites a class string in the composed tree — the
+  template file is not touched, and the container's own `style` (the depth
+  indent) is preserved. The same pass gives every comment row a DOM id
+  (`g7fa-comment-<id>`) so the post's trophy button has something to scroll to.
 - **Best answer:** a "✅ Accepted answer" badge + Accept / Unaccept buttons (author
   or admin only) spliced after each comment body, plus a full accepted-answer
-  content box (avatar, name, timestamp, formatted body — see Features) in the
-  widget.
+  a trophy button on the post that scrolls to it.
 - **Comment-delete refetch fix** *(1.1.0)*: the shared post/comment delete
   confirmation dialog (a `sirsoft-basic` core template) only refetched the `post`
   data source on comment delete, not this plugin's `forum_meta` sidecar — so the
@@ -155,7 +157,7 @@ comment-side UI is spliced into the layout by this plugin.
 - Plugin **[`g7-comment-editor >= 1.1.0`](https://github.com/William1607cho/g7-comment-editor)**
   — the forum board's comment box uses it for CKEditor. **This must be installed and
   activated first** (see Installation). Raised from `>= 1.0.0` in this plugin's
-  `1.1.0` release: the accepted-answer content box can display tables, and
+  `1.1.0` release: accepted answers can contain tables, and
   `g7-comment-editor`'s sanitizer only started preserving table markup at its own
   `1.1.0` — on an older `g7-comment-editor`, a table inside an accepted answer
   would render as nothing.
@@ -335,17 +337,27 @@ other Gnuboard7 plugins.)
   정사각으로 옮겼습니다(아이콘 `circle-check`). 채택된 상태는 초록으로 채우고
   `aria-pressed` 로 알립니다. **누가 채택할 수 있는지와 동작은 그대로입니다** — 판정식도
   엔드포인트도 권한도 바뀌지 않았고, 버튼 자리만 옮겼습니다.
-- **채택 답변 강조** *(1.3.0)*: 채택된 댓글은 행 전체에 초록 테두리·배경이 들어가고,
-  "채택됨" 표시가 권한과 무관하게 모두에게 보입니다. 다크 모드에서도 같은 계열로 읽힙니다.
+- **배지 제거와 주황 통일** *(1.4.0)*: "고정됨"·"채택된 답변 있음"(본글)과 "채택됨"(댓글)
+  글자 배지를 없앴습니다. 상태는 **버튼의 채운 색**이 알리고, 고정·잠금·채택이 모두 같은
+  주황(`orange-700`, 다크 `orange-600`)을 씁니다. **"잠김" 배지만 남겼습니다** — 잠금 버튼은
+  관리자급에게만 보여서, 그것마저 없애면 읽는 사람이 잠긴 글인지 알 길이 없기 때문입니다.
+- **채택 트로피** *(1.4.0)*: 댓글의 채택 버튼은 채택 전 체크, 채택되면 같은 자리에서
+  트로피 + 주황 채움으로 바뀝니다. 본글에는 채택된 답변이 있을 때만 트로피 버튼이 생기고
+  (권한 무관, 모두에게 표시) 누르면 그 댓글로 스크롤합니다 — 코어 `replaceUrl` 액션의
+  `scroll` 옵션이라 주소만 바꾸고 재조회·재마운트가 없으며 API·권한을 건드리지 않습니다.
+- **채택 답변 강조**: 채택된 댓글은 행 전체에 **주황** 테두리·배경이 들어갑니다
+  (1.3.0 까지는 초록). 글자색은 건드리지 않고 배경 톤으로만 강조해 본문 가독성을 지킵니다.
+  다크 모드에서도 같은 계열로 읽힙니다.
   강조는 `after_apply` 가 넘겨준 트리에서 댓글 행 컨테이너의 `className` 만 바꾸는
   방식이라 템플릿 파일을 건드리지 않고, 컨테이너의 `style`(댓글 깊이 들여쓰기)도 그대로
   둡니다. 채택이 아닌 행에는 같은 두께의 투명 테두리를 깔아 강조가 켜질 때 밀리지 않습니다.
 - **베스트답글**: 글 작성자(또는 사이트 관리자 — 1.3.0 에서 바뀌지 않음)가 댓글 하나를 "채택된 답변"으로 지정.
   답글(대댓글)도 가능, 게시글당 1개, 채택 댓글 삭제 시 자동 해제.
-- **채택된 답변 전문 표시** *(1.1.0 신규)*: 위젯에 채택된 답변의 서식 포함 전문(굵게·목록·
-  인용구·표)을 작성자 아바타·이름·시각과 함께 표시. 기존 댓글과 동일한 이스케이프 후
-  클라이언트 재정화 방식이라 별도의 XSS 방어 경로를 새로 열지 않습니다. 색상은 현재
-  고정값(설정 UI 없음).
+- **채택된 답변은 본문에서 다시 보여주지 않습니다** *(1.4.0 변경)*: 1.1.0~1.3.0 에서는
+  위젯이 채택된 댓글의 전문을 상자로 한 번 더 보여줬습니다. 같은 댓글이 바로 아래 목록에
+  주황으로 강조된 채 이미 있고 트로피 버튼이 그 자리로 데려다주므로, 중복을 없앴습니다.
+  게시글 응답이 댓글을 전부 싣고(댓글 페이지네이션 없음) 포럼 게시판은 답글을 기본
+  펼침으로 두므로, 채택된 댓글은 항상 같은 화면 안에 있습니다.
 - **게시판 목록 참여자 · 최근 활동** *(1.1.0 신규)*: 게시판 목록에 "참여자" 컬럼(최근
   댓글 작성자 아바타, 최대 5명), 포럼 게시판은 "작성일"이 "최근 활동"으로 표시.
 - **포럼 게시판 목록은 항상 최근활동순** *(1.2.0 신규)*: 포럼 유형 게시판의 목록은

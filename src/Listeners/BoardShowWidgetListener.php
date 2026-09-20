@@ -44,17 +44,11 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 댓글 추천·채택 버튼 바 노드의 안정 식별자 */
     private const COMMENT_REACTIONS_ID = 'g7_forum_addon_comment_reactions';
 
-    /** 댓글 "채택됨" 표시 노드의 안정 식별자 (채택 버튼은 추천 바 안에 있다) */
-    private const ACCEPTED_REPLY_ID = 'g7_forum_addon_accepted_reply';
-
     /** 댓글 행 컨테이너 className(sirsoft-basic 원본 그대로) — 채택 강조 앵커 */
     private const COMMENT_ROW_CLASS = 'flex gap-3 p-4 rounded-lg';
 
     /** 채택 강조가 이미 적용됐는지 표시하는 마커(멱등) */
     private const ACCEPTED_ROW_MARKER = 'forum_meta?.data?.accepted_reply_id === comment?.id';
-
-    /** 위젯 영역의 채택된 답변 전문 박스 노드의 안정 식별자 */
-    private const ACCEPTED_REPLY_BOX_ID = 'g7_forum_addon_accepted_reply_box';
 
     /** `/meta` 데이터소스 id */
     private const META_DS_ID = 'forum_meta';
@@ -120,6 +114,35 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 잠금 버튼 아이콘 (서브셋에 있다. `lock-open`/`unlock` 은 없어 상태는 색으로 구분한다) */
     private const LOCK_ICON = 'lock';
 
+    /**
+     * 채택된 상태를 나타내는 아이콘 (1.4.0).
+     *
+     * 서브셋에서 상·트로피 계열로 쓸 수 있는 것은 `trophy` 와 `star` 뿐이고
+     * (`award`·`medal`·`certificate`·`ribbon`·`crown` 은 없다), `star` 는 즐겨찾기·평점
+     * 으로 읽히기 쉬워 `trophy` 를 쓴다.
+     */
+    private const TROPHY_ICON = 'trophy';
+
+    /** 채택 전(미채택) 댓글 버튼 아이콘 */
+    private const ACCEPT_ICON = 'circle-check';
+
+    /**
+     * 켜진 토글의 채운 색 (1.4.0 — 고정·잠금·채택 공통).
+     *
+     * 1.3.0 까지 고정은 파랑, 잠금은 회색, 채택은 초록이라 같은 줄의 버튼 셋이 서로 다른
+     * 색을 냈다. 이제 셋 다 같은 주황으로 "켜짐" 을 말한다.
+     *
+     * 명도 선택: 주황 계열 중 `orange-700`(oklch 55.3%)이 1.3.0 의 `blue-600`(≈54.6%)과
+     * 거의 같은 밝기라 버튼의 시각적 무게가 그대로 유지되고, 흰 아이콘 대비도 확보된다.
+     * 더 진한 `orange-800`(47%)·`orange-900`(40.8%)은 주황보다 갈색으로 읽힌다.
+     * 다크 모드는 한 단계 밝은 `orange-600` 을 쓴다(어두운 배경에서 700 은 잠긴다).
+     */
+    private const ON_FILL_CLASS = 'cursor-pointer border-orange-700 bg-orange-700 text-white hover:bg-orange-800 '
+        .'dark:border-orange-600 dark:bg-orange-600 dark:hover:bg-orange-500';
+
+    /** 채택된 댓글 행에 부여하는 DOM id 접두사 (본글 트로피 버튼의 이동 대상) */
+    private const COMMENT_DOM_ID_PREFIX = 'g7fa-comment-';
+
     public static function getSubscribedHooks(): array
     {
         return [
@@ -175,7 +198,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             }
         }
 
-        // 댓글 본문 뒤에 리액션 바 splice (멱등). 위젯/잠금과 독립.
+        // 댓글 본문 뒤에 추천·채택 버튼 바 splice (멱등). 위젯/잠금과 독립.
         if (! $this->treeHasNodeId($layout['components'], self::COMMENT_REACTIONS_ID)) {
             $reactApplied = 0;
             $layout['components'] = $this->applyCommentReactions($layout['components'], $reactApplied);
@@ -187,24 +210,12 @@ class BoardShowWidgetListener implements HookListenerInterface
             }
         }
 
-        // 댓글 본문 뒤에 채택(베스트답글) 배지/버튼 splice (멱등). 리액션 바보다 위에 온다.
-        if (! $this->treeHasNodeId($layout['components'], self::ACCEPTED_REPLY_ID)) {
-            $acceptApplied = 0;
-            $layout['components'] = $this->applyAcceptedReplyUi($layout['components'], $acceptApplied);
-
-            if ($acceptApplied === 0) {
-                Log::warning('[g7-forum-addon] board/show 댓글 본문 앵커를 찾지 못해 채택 UI 를 주입하지 못했습니다. 채택 API 는 그대로 동작합니다.', [
-                    'template_id' => $templateId,
-                ]);
-            }
-        }
-
-        // 채택된 댓글의 행 전체를 강조한다(멱등). 배지·버튼과 독립적으로 시도한다.
+        // 채택된 댓글의 행 전체를 강조하고, 본글 트로피 버튼이 찾아갈 DOM id 를 부여한다(멱등).
         $rowApplied = 0;
         $layout['components'] = $this->applyAcceptedRowHighlight($layout['components'], $rowApplied);
 
         if ($rowApplied === 0) {
-            Log::warning('[g7-forum-addon] board/show 댓글 행 컨테이너 앵커를 찾지 못해 채택 강조를 적용하지 못했습니다. 채택 배지와 API 는 그대로 동작합니다.', [
+            Log::warning('[g7-forum-addon] board/show 댓글 행 컨테이너 앵커를 찾지 못해 채택 강조와 댓글 DOM id 를 적용하지 못했습니다. 채택 버튼과 API 는 그대로 동작하고, 본글의 채택 답변 보기 버튼만 이동 대상을 찾지 못합니다.', [
                 'template_id' => $templateId,
             ]);
         }
@@ -440,20 +451,24 @@ class BoardShowWidgetListener implements HookListenerInterface
     }
 
     /**
-     * 주입할 위젯 노드.
+     * 주입할 위젯 노드 — **버튼 한 줄**.
      *
-     * ── 1.3.0 레이아웃 ──────────────────────────────────────────
-     * 바깥은 상자가 아니다(점선 테두리·배경 없음, 여백만 유지). 안은 두 층이다.
+     * ── 1.4.0 레이아웃 ──────────────────────────────────────────
+     *   ▲n ▼n  (잠김)                                🏆  📢  🔒
      *
-     *   [버튼 줄]  ▲n ▼n   (배지…)                      📢  🔒
-     *   [채택 답변 전문 박스]
+     * 1.4.0 에서 셋을 걷어냈다.
+     *  - "고정됨"·"채택된 답변 있음" 글자 배지 → 버튼의 주황 채움과 트로피 버튼이 대신한다.
+     *  - 배지를 담던 묶음 `<Div>` → 배지가 하나뿐이라 대부분 빈 채로 `gap` 만 만들었다.
+     *  - **채택 답변 전문 박스** → 같은 내용이 아래 댓글 목록에 이미 있고(채택된 행은
+     *    주황으로 강조된다), 트로피 버튼이 그 자리로 데려다준다. 같은 글을 두 번
+     *    보여주면서 위젯만 길어졌다.
      *
-     * 버튼 줄은 `flex`(줄바꿈 없음)라 좁은 화면에서도 버튼 4개가 한 줄을 지킨다.
-     * 가운데 배지 영역만 `flex-wrap min-w-0`이라, 공간이 모자라면 배지가 줄바꿈되거나
-     * 줄어들고 버튼은 밀려나지 않는다. 오른쪽 버튼 묶음은 `ml-auto` 로 끝에 붙는다.
+     * 그 결과 자식이 버튼 줄 하나만 남아, 줄을 감싸던 바깥 `<Div>` 도 없앴다 —
+     * 남겨 두면 빈 껍데기가 위아래 여백만 더한다.
      *
-     * 채택 답변 박스는 버튼 줄의 형제가 아니라 아래 층이다 — 버튼 줄이 `nowrap` 이라
-     * 그 안에 두면 `w-full` 이 먹지 않고 눌린다.
+     * 줄은 `flex`(줄바꿈 없음)라 좁은 화면에서도 버튼이 한 줄을 지킨다. 가운데
+     * "잠김" 배지는 줄의 직접 자식이라 렌더되지 않으면 `gap` 도 생기지 않는다.
+     * 오른쪽 버튼 묶음은 `ml-auto` 로 끝에 붙는다.
      *
      * board_type 게이팅은 위젯 노드 전체 `if` 로 유지한다.
      *
@@ -461,79 +476,104 @@ class BoardShowWidgetListener implements HookListenerInterface
      */
     private function widgetNode(): array
     {
-        $badge = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold text-white';
-
         return [
             'id' => self::WIDGET_ID,
             'type' => 'basic',
             'name' => 'Div',
             'if' => "{{post?.data?.board?.type === 'forum' && post?.data?.status !== 'blinded' && post?.data?.content !== null}}",
             'props' => [
-                // 점선 상자를 걷어냈다. 좌우 여백(mx-6)은 본문 카드와 맞추기 위해 유지한다.
-                'className' => 'mx-6 mt-2 mb-2',
+                // 위젯은 이제 **버튼 한 줄이 전부**다. 줄을 감싸던 바깥 `<Div>` 는
+                // 1.4.0 에서 없앴다 — 배지 묶음과 채택 답변 상자가 빠지면서 자식이
+                // 하나만 남아, 감싸는 노드가 빈 껍데기가 되고 위아래 여백만 더했다.
+                // 좌우 여백(mx-6)은 본문 카드와 줄을 맞추기 위해 유지한다.
+                'className' => 'mx-6 mt-2 mb-2 flex items-center gap-2',
+            ],
+            'children' => [
+                // 왼쪽: 추천 업·다운.
+                $this->reactionBar('post'),
+                [
+                    // 잠김 배지 — 유일하게 남은 글자 배지다. 잠긴 글은 읽는 사람도
+                    // 알아야 하는데, 잠금 버튼은 관리자급에게만 보이기 때문이다.
+                    // 묶음 없이 줄의 직접 자식이라 렌더되지 않으면 빈자리도 없다.
+                    'type' => 'basic',
+                    'name' => 'Span',
+                    'if' => '{{forum_meta?.data?.locked}}',
+                    'props' => [
+                        'className' => 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 '
+                            .'text-xs font-semibold text-white bg-orange-700 dark:bg-orange-600',
+                    ],
+                    'text' => '$t:g7-forum-addon.locked_badge',
+                ],
+                [
+                    // 오른쪽 끝 버튼 묶음.
+                    //  - 트로피: 채택된 답변이 있으면 **모두에게** 보인다(권한 무관).
+                    //    누르면 그 댓글로 이동한다.
+                    //  - 확성기·자물쇠: 관리자급(`post.data.abilities.can_manage`)에게만.
+                    'type' => 'basic',
+                    'name' => 'Div',
+                    'props' => ['className' => 'ml-auto flex items-center gap-2 shrink-0'],
+                    'children' => [
+                        $this->acceptedJumpButton(),
+                        $this->pinToggleButton(false),
+                        $this->pinToggleButton(true),
+                        $this->lockToggleButton(false),
+                        $this->lockToggleButton(true),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * 본글 위젯의 "채택된 답변 보기" 트로피 버튼 (1.4.0 신규).
+     *
+     * 채택된 답변이 있을 때만 보이고, 권한과 무관하게 **모두에게** 보인다 — 없어진
+     * "채택된 답변 있음" 배지의 자리를 대신한다. 채운 주황색 자체가 "이 글에는 채택된
+     * 답변이 있다" 는 표시다.
+     *
+     * ── 이동 방식 ────────────────────────────────────────────────
+     * 코어 `replaceUrl` 액션에 `scroll` 옵션을 준다. 이 액션은 `history.replaceState`
+     * 로 주소만 바꾸고 **데이터소스 재조회도 컴포넌트 재마운트도 하지 않는다**
+     * (`ActionDispatcher::handleReplaceUrl`). `target` 이 지금 보고 있는 주소 그대로라
+     * 주소도 실질적으로 그대로다. 그 뒤 `applyScrollOption` 이 `#`/`.` 로 시작하는
+     * 선택자를 `document.querySelector` 로 찾아 스크롤한다 — 순수 화면 동작이라
+     * API 도 권한도 건드리지 않는다.
+     *
+     * 이동 대상은 채택된 댓글 행에 붙인 DOM id 다({@see applyAcceptedRowHighlight}).
+     *
+     * @return array<string, mixed>
+     */
+    private function acceptedJumpButton(): array
+    {
+        $label = '$t:g7-forum-addon.view_accepted_answer';
+
+        return [
+            'type' => 'basic',
+            'name' => 'Button',
+            'if' => '{{!!forum_meta?.data?.accepted_reply_id}}',
+            'props' => [
+                'type' => 'button',
+                'className' => $this->squareButtonClass().self::ON_FILL_CLASS,
+                'aria-label' => $label,
             ],
             'children' => [
                 [
-                    // 버튼 줄 — 줄바꿈 없음.
-                    'type' => 'basic',
-                    'name' => 'Div',
-                    'props' => ['className' => 'flex items-center gap-2'],
-                    'children' => [
-                        // 왼쪽: 추천 업·다운.
-                        $this->reactionBar('post'),
-                        [
-                            // 가운데: 상태 배지. 여기만 줄바꿈·축소를 허용한다.
-                            'type' => 'basic',
-                            'name' => 'Div',
-                            'props' => ['className' => 'flex flex-wrap items-center gap-1.5 min-w-0'],
-                            'children' => [
-                                [
-                                    // 고정(공지) 배지 — forum_meta.data.is_notice 가 참일 때만.
-                                    'type' => 'basic',
-                                    'name' => 'Span',
-                                    'if' => '{{forum_meta?.data?.is_notice}}',
-                                    'props' => ['className' => $badge.' bg-blue-600 dark:bg-blue-500'],
-                                    'text' => '$t:g7-forum-addon.pinned_badge',
-                                ],
-                                [
-                                    // 잠금 배지 — forum_meta.data.locked 가 참일 때만.
-                                    'type' => 'basic',
-                                    'name' => 'Span',
-                                    'if' => '{{forum_meta?.data?.locked}}',
-                                    'props' => ['className' => $badge.' bg-gray-600 dark:bg-gray-500'],
-                                    'text' => '$t:g7-forum-addon.locked_badge',
-                                ],
-                                [
-                                    // 채택 답변 요약 배지 — forum_meta.data.accepted_reply_id 가 있을 때만.
-                                    'type' => 'basic',
-                                    'name' => 'Span',
-                                    'if' => '{{forum_meta?.data?.accepted_reply_id}}',
-                                    'props' => ['className' => $badge.' bg-green-600 dark:bg-green-500'],
-                                    'text' => '$t:g7-forum-addon.widget_has_accepted',
-                                ],
-                            ],
-                        ],
-                        [
-                            // 오른쪽 끝: 관리자급 전용 핀/잠금 토글.
-                            // `post.data.abilities.can_manage`(= `sirsoft-board.{slug}.manager`)
-                            // 로 노출하고, 서버가 같은 식별자로 최종 판정한다.
-                            // 켜짐/꺼짐은 같은 자리에 하나씩만 렌더되는 두 버튼으로 나타낸다 —
-                            // 대상 경로를 표현식으로 조립하지 않아도 되고, 채운 색과
-                            // `aria-pressed` 가 버튼별로 고정값이라 읽기 쉽다.
-                            'type' => 'basic',
-                            'name' => 'Div',
-                            'props' => ['className' => 'ml-auto flex items-center gap-2 shrink-0'],
-                            'children' => [
-                                $this->pinToggleButton(false),
-                                $this->pinToggleButton(true),
-                                $this->lockToggleButton(false),
-                                $this->lockToggleButton(true),
-                            ],
-                        ],
+                    'type' => 'composite',
+                    'name' => 'Icon',
+                    'props' => ['name' => self::TROPHY_ICON, 'ariaLabel' => $label],
+                ],
+                $this->tooltipNode($label),
+            ],
+            'actions' => [
+                [
+                    'type' => 'click',
+                    'handler' => 'replaceUrl',
+                    'target' => '/board/{{route?.slug}}/{{route?.id}}',
+                    'params' => [
+                        'scroll' => '#'.self::COMMENT_DOM_ID_PREFIX.'{{forum_meta?.data?.accepted_reply_id}}',
+                        'scrollBehavior' => 'smooth',
                     ],
                 ],
-                // 채택된 답변 전문 박스 — forum_meta.data.accepted_reply 가 있을 때만.
-                $this->acceptedReplyBox(),
             ],
         ];
     }
@@ -589,87 +629,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                 'aria-hidden' => 'true',
             ],
             'text' => $textExpr,
-        ];
-    }
-
-    /**
-     * 채택된 답변 전문 박스.
-     *
-     * `forum_meta.data.accepted_reply` 가 있을 때만 렌더된다(없으면 = 채택 안 됨 또는
-     * 채택된 댓글이 삭제·블라인드 등으로 무효화됨 — `AcceptedReplyState::resolveForMeta()`
-     * 가 자기치유하므로 이 박스도 자동으로 사라진다, 별도 처리 불필요).
-     *
-     * 본문은 **`text` 바인딩으로 이스케이프해 렌더**한 뒤, g7-comment-editor 가 페이지
-     * 전역에서 이미 스캔하는 `p.text-gray-700.dark:text-gray-300`(빈 자식 + HTML-ish
-     * 여부 판정) 선택자에 **일부러 같은 클래스를 그대로 얹어** 그 기존 승격
-     * 파이프라인(`sanitizeCommentHtml` 재정화 → `innerHTML` 승격 → `enrichComment`
-     * 외부링크 렌더링)에 편승한다. 댓글 본문을 여기서 다시 안전하게 표시하려고
-     * 새 렌더링 경로(`HtmlContent` composite 의 `dangerouslySetInnerHTML`)를 만들면
-     * DB 원본을 검증 없이 그대로 주입하는 셈이 되어, 사이트 전체가 의존하는
-     * "표시할 때마다 재정화" 방어선을 이 박스만 우회하게 된다 — 그래서 일부러
-     * 기존 댓글과 완전히 같은 표시 경로를 태운다(새 코드 0, g7-comment-editor 무변경).
-     * 클래스 조합(`prose dark:prose-invert prose-sm max-w-none text-gray-700
-     * dark:text-gray-300`)은 이 템플릿(`_modal_privacy.json` 등)에 이미 리터럴로 존재해
-     * Tailwind 빌드 시점에 스캔된 조합만 골랐다(즉석 조합 시 CSS 미생성 함정 재발 방지).
-     *
-     * @return array<string, mixed>
-     */
-    private function acceptedReplyBox(): array
-    {
-        return [
-            'id' => self::ACCEPTED_REPLY_BOX_ID,
-            'type' => 'basic',
-            'name' => 'Div',
-            'if' => '{{!!forum_meta?.data?.accepted_reply}}',
-            'props' => [
-                // 초록 계열 고정값 — 다음 단계(색상 설정 UI)에서 여기 4개 클래스
-                // (bg-green-50/dark:bg-green-900/10/border-green-300/dark:border-green-700)
-                // 를 설정값 기반 동적 스타일로 교체 예정.
-                'className' => 'w-full mt-1 rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 p-3',
-            ],
-            'children' => [
-                [
-                    // 작성자 아이콘 + 이름 + 작성 시각.
-                    'type' => 'basic',
-                    'name' => 'Div',
-                    'props' => ['className' => 'flex items-center gap-2 mb-2'],
-                    'children' => [
-                        [
-                            'type' => 'composite',
-                            'name' => 'Avatar',
-                            'props' => [
-                                'author' => '{{forum_meta?.data?.accepted_reply?.author}}',
-                                'size' => 'xs',
-                            ],
-                        ],
-                        [
-                            'type' => 'basic',
-                            'name' => 'Span',
-                            'props' => ['className' => 'text-sm font-medium text-green-800 dark:text-green-300'],
-                            'text' => '{{forum_meta?.data?.accepted_reply?.author?.name ?? \'\'}}',
-                        ],
-                        [
-                            'type' => 'basic',
-                            'name' => 'Span',
-                            'props' => [
-                                'className' => 'text-xs text-green-600 dark:text-green-400',
-                                'title' => '{{forum_meta?.data?.accepted_reply?.created_at ?? \'\'}}',
-                            ],
-                            'text' => '{{forum_meta?.data?.accepted_reply?.created_at_formatted ?? \'\'}}',
-                        ],
-                    ],
-                ],
-                [
-                    // 본문 전문 — text 바인딩(이스케이프) + g7-comment-editor 기존 전역
-                    // 스캐너(class 조합이 앵커)가 재정화·승격을 전담. 새 렌더링 경로 없음.
-                    'type' => 'basic',
-                    'name' => 'P',
-                    'props' => [
-                        'className' => 'prose dark:prose-invert prose-sm max-w-none text-gray-700 dark:text-gray-300',
-                    ],
-                    'text' => '{{forum_meta?.data?.accepted_reply?.content ?? \'\'}}',
-                ],
-            ],
         ];
     }
 
@@ -910,8 +869,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             icon: self::LOCK_ICON,
             endpoint: $forUnlock ? 'unlock' : 'lock',
             labelKey: $forUnlock ? '$t:g7-forum-addon.unlock_button' : '$t:g7-forum-addon.lock_button',
-            onCls: 'cursor-pointer border-gray-600 bg-gray-600 text-white hover:bg-gray-700 '
-                .'dark:border-gray-500 dark:bg-gray-500 dark:hover:bg-gray-400',
+            onCls: self::ON_FILL_CLASS,
         );
     }
 
@@ -919,8 +877,8 @@ class BoardShowWidgetListener implements HookListenerInterface
      * 관리자급 핀(고정)/고정해제 버튼 1개.
      *
      * 현재 상태는 `forum_meta.data.is_notice`(= 코어 `board_posts.is_notice`)로 읽는다 —
-     * 애드온이 따로 저장하는 값이 없다. 켜진 상태의 채운 색은 고정 배지(`bg-blue-600`)와
-     * 같은 계열이라 배지와 버튼이 같은 상태를 가리킨다는 것이 한눈에 보인다.
+     * 애드온이 따로 저장하는 값이 없다. 1.4.0 부터 "고정됨" 글자 배지가 없으므로,
+     * **켜진 상태를 알리는 것은 이 버튼의 주황 채움뿐이다**({@see ON_FILL_CLASS}).
      *
      * @param  bool  $forUnpin  true=고정해제 버튼(고정돼 있을 때 표시), false=고정 버튼
      * @return array<string, mixed>
@@ -933,8 +891,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             icon: self::PIN_ICON,
             endpoint: $forUnpin ? 'unpin' : 'pin',
             labelKey: $forUnpin ? '$t:g7-forum-addon.unpin_button' : '$t:g7-forum-addon.pin_button',
-            onCls: 'cursor-pointer border-blue-600 bg-blue-600 text-white hover:bg-blue-700 '
-                .'dark:border-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400',
+            onCls: self::ON_FILL_CLASS,
         );
     }
 
@@ -1179,6 +1136,13 @@ class BoardShowWidgetListener implements HookListenerInterface
      * 채택이 아닐 때도 `border border-transparent` 를 깔아 둔다 — 강조가 켜질 때
      * 테두리 두께만큼 밀려나는 것을 막는다.
      *
+     * 색은 1.4.0 에서 초록에서 주황으로 옮겼다(버튼 채움색과 같은 계열). 글자색은
+     * 건드리지 않고 **테두리와 옅은 배경 톤으로만** 강조해 본문 가독성을 유지한다 —
+     * 밝은 모드 `bg-orange-50`(oklch 98%), 다크 모드 `bg-orange-900/20`.
+     *
+     * 이 메서드는 강조와 함께 댓글 행에 **DOM id 도 부여한다.** 본글의 "채택된 답변
+     * 보기" 버튼이 스크롤해 갈 대상이 필요한데, 템플릿 댓글 행에는 id 가 없다.
+     *
      * @param  array<int, mixed>  $nodes
      * @param  int  $applied  (참조) 적용 횟수
      * @return array<int, mixed>
@@ -1190,8 +1154,15 @@ class BoardShowWidgetListener implements HookListenerInterface
         foreach ($nodes as $node) {
             if (is_array($node) && $this->isCommentRowContainer($node)) {
                 $node['props']['className'] = self::COMMENT_ROW_CLASS
-                    .' {{'.self::ACCEPTED_ROW_MARKER." ? 'border border-green-300 bg-green-50"
-                    ." dark:border-green-700 dark:bg-green-900/20' : 'border border-transparent'}}";
+                    .' {{'.self::ACCEPTED_ROW_MARKER." ? 'border border-orange-300 bg-orange-50"
+                    ." dark:border-orange-700 dark:bg-orange-900/20' : 'border border-transparent'}}";
+
+                // 본글 트로피 버튼이 스크롤해 갈 대상. 댓글마다 고정된 DOM id 를 준다 —
+                // 채택된 행에만 조건부로 주면 채택이 아닐 때 `id=""` 가 남는다.
+                // `props.id` 는 basic 노드에서 DOM 으로 그대로 전달된다(코어
+                // `DynamicRenderer` 의 DOM-safe 필터는 `__` 접두사와 `editorAttrs` 만 걸러낸다).
+                $node['props']['id'] = self::COMMENT_DOM_ID_PREFIX.'{{comment?.id}}';
+
                 $applied++;
             }
 
@@ -1299,8 +1270,9 @@ class BoardShowWidgetListener implements HookListenerInterface
     /**
      * 댓글의 채택/채택취소 토글 버튼 1개 (40px 정사각).
      *
-     * 추천 업·다운과 같은 줄, 같은 크기다. 아이콘은 `circle-check` 하나이고
-     * **채택된 상태는 초록으로 채워** 구분하며 `aria-pressed` 로도 알린다.
+     * 추천 업·다운과 같은 줄, 같은 크기다. **아이콘이 상태를 말한다** —
+     * 채택 전에는 체크(`circle-check`), 채택되면 같은 자리에서 **트로피 + 주황 채움**
+     * 으로 바뀐다(1.4.0). 상태는 `aria-pressed` 로도 알린다.
      * 같은 자리에 두 버튼 중 하나만 렌더된다(위젯의 핀·잠금과 같은 방식).
      *
      * 노출 조건은 1.2.0 의 텍스트 버튼에서 **그대로 가져왔다** — 글 작성자 본인이거나
@@ -1316,10 +1288,8 @@ class BoardShowWidgetListener implements HookListenerInterface
         $isAccepted = 'forum_meta?.data?.accepted_reply_id === comment?.id';
         $labelKey = $on ? '$t:g7-forum-addon.unaccept_button' : '$t:g7-forum-addon.accept_button';
 
-        $onCls = 'cursor-pointer border-green-600 bg-green-600 text-white hover:bg-green-700 '
-            .'dark:border-green-500 dark:bg-green-500 dark:hover:bg-green-400';
-        $offCls = 'cursor-pointer border-green-300 bg-white text-green-700 hover:bg-green-50 '
-            .'dark:border-green-700 dark:bg-gray-800 dark:text-green-300 dark:hover:bg-green-900/30';
+        $offCls = 'cursor-pointer border-orange-300 bg-white text-orange-700 hover:bg-orange-50 '
+            .'dark:border-orange-700 dark:bg-gray-800 dark:text-orange-300 dark:hover:bg-orange-900/30';
 
         return [
             'type' => 'basic',
@@ -1327,7 +1297,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             'if' => '{{'.$canManage.' && '.($on ? $isAccepted : '!('.$isAccepted.')').'}}',
             'props' => [
                 'type' => 'button',
-                'className' => $this->squareButtonClass().($on ? $onCls : $offCls),
+                'className' => $this->squareButtonClass().($on ? self::ON_FILL_CLASS : $offCls),
                 'aria-label' => $labelKey,
                 'aria-pressed' => $on ? 'true' : 'false',
             ],
@@ -1335,90 +1305,14 @@ class BoardShowWidgetListener implements HookListenerInterface
                 [
                     'type' => 'composite',
                     'name' => 'Icon',
-                    'props' => ['name' => 'circle-check', 'ariaLabel' => $labelKey],
+                    'props' => [
+                        'name' => $on ? self::TROPHY_ICON : self::ACCEPT_ICON,
+                        'ariaLabel' => $labelKey,
+                    ],
                 ],
                 $this->tooltipNode($labelKey),
             ],
             'actions' => [$this->acceptAction($on ? 'unaccept' : 'accept')],
-        ];
-    }
-
-    /**
-     * 컴포넌트 트리를 재귀 순회하며, 렌더된 댓글 본문 `<P>` 노드 **직후**에 "채택됨"
-     * 표시 줄을 splice 한다. (리액션 바보다 나중에 splice 호출되므로 `<P>` 바로 뒤 =
-     * 추천·채택 버튼 바 위에 온다.)
-     *
-     * @param  array<int, mixed>  $nodes
-     * @param  int  $applied  (참조) 적용 횟수
-     * @return array<int, mixed>
-     */
-    private function applyAcceptedReplyUi(array $nodes, int &$applied): array
-    {
-        $out = [];
-
-        foreach ($nodes as $node) {
-            if (is_array($node) && isset($node['children']) && is_array($node['children'])) {
-                $node['children'] = $this->applyAcceptedReplyUi($node['children'], $applied);
-            }
-
-            $out[] = $node;
-
-            if ($this->isCommentContentP($node)) {
-                $out[] = $this->acceptedReplyNode();
-                $applied++;
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * 댓글 본문 아래에 붙는 "채택됨" 표시 줄.
-     *
-     * 이 댓글이 채택된 답변이면 **모두에게** 보인다(권한 무관). 채택·취소 버튼은
-     * 1.3.0 에서 추천 바로 옮겨 정사각 토글이 됐다 —
-     * {@see commentAcceptToggleButton}. 여기는 표시 전용이다.
-     *
-     * 삭제·블라인드·수정중 댓글엔 숨김, 포럼 게시판에서만 렌더.
-     *
-     * @return array<string, mixed>
-     */
-    private function acceptedReplyNode(): array
-    {
-        $isAccepted = 'forum_meta?.data?.accepted_reply_id === comment?.id';
-        $visibleBase = "(!comment?.deleted_at || comment?.is_cascade_deleted) && comment?.status !== 'blinded'"
-            ." && _global?.commentEdit?.editingCommentId !== comment?.id && post?.data?.board?.type === 'forum'";
-
-        return [
-            'id' => self::ACCEPTED_REPLY_ID,
-            'type' => 'basic',
-            'name' => 'Div',
-            'if' => '{{'.$visibleBase.' && '.$isAccepted.'}}',
-            'props' => ['className' => 'mt-2 flex flex-wrap items-center gap-2'],
-            'children' => [
-                [
-                    // "채택됨" 표시 — 채택된 댓글이면 권한과 무관하게 모두에게 보인다.
-                    // 행 전체 강조(applyAcceptedRowHighlight)와 짝이다 — 강조만으로는
-                    // 색을 구분하기 어려운 환경에서 무엇을 뜻하는지 알 수 없다.
-                    'type' => 'basic',
-                    'name' => 'Span',
-                    'props' => [
-                        'className' => 'inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300',
-                    ],
-                    'children' => [
-                        [
-                            'type' => 'composite',
-                            'name' => 'Icon',
-                            'props' => ['name' => 'circle-check', 'size' => 'sm', 'ariaLabel' => '$t:g7-forum-addon.accepted_badge'],
-                        ],
-                        [
-                            'type' => 'basic',
-                            'name' => 'Span',
-                            'text' => '$t:g7-forum-addon.accepted_badge',
-                        ],
-                    ],
-                ],
-            ],
         ];
     }
 
