@@ -41,10 +41,10 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 댓글 입력 폼 `if` 에 이미 잠금 조건이 붙었는지 표시하는 마커 */
     private const LOCK_IF_MARKER = 'forum_meta?.data?.locked';
 
-    /** 댓글 리액션 바 노드의 안정 식별자 */
+    /** 댓글 추천·채택 버튼 바 노드의 안정 식별자 */
     private const COMMENT_REACTIONS_ID = 'g7_forum_addon_comment_reactions';
 
-    /** 댓글 채택(베스트답글) UI 노드의 안정 식별자 */
+    /** 댓글 "채택됨" 표시 노드의 안정 식별자 (채택 버튼은 추천 바 안에 있다) */
     private const ACCEPTED_REPLY_ID = 'g7_forum_addon_accepted_reply';
 
     /** 댓글 행 컨테이너 className(sirsoft-basic 원본 그대로) — 채택 강조 앵커 */
@@ -549,7 +549,47 @@ class BoardShowWidgetListener implements HookListenerInterface
      */
     private function squareButtonClass(): string
     {
-        return 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ';
+        // `relative group` 은 툴팁({@see tooltipNode})을 위한 것이다 — 툴팁 Span 이
+        // 이 버튼을 기준으로 절대 배치되고, `group-hover:` 로 이 버튼에 마우스가
+        // 올라올 때만 보인다.
+        return 'relative group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ';
+    }
+
+    /**
+     * 버튼 위에 뜨는 툴팁 노드.
+     *
+     * ── 왜 `title` 속성이 아닌가 ─────────────────────────────────
+     * 브라우저 기본 툴팁은 0.5~1초쯤 기다려야 뜬다. 아이콘만 있는 버튼이 네 개 늘어선
+     * 줄에서는 그 지연이 곧 "무슨 버튼인지 모르는 시간"이라, 즉시 뜨는 툴팁을 직접
+     * 그린다. 필요한 유틸리티(`group-hover:visible` · `group-hover:opacity-100` ·
+     * `absolute` · `bottom-full` · `-translate-x-1/2` 등)가 템플릿 빌드 CSS와 코어
+     * 빌드 CSS **양쪽에 모두** 있는 것을 확인하고 골랐다.
+     *
+     * `title` 속성은 **넣지 않는다** — 같이 두면 커스텀 툴팁과 브라우저 툴팁이 겹쳐
+     * 두 번 뜬다. 접근성은 `aria-label` 이 계속 담당하고, 툴팁 자신은
+     * `aria-hidden` + `pointer-events-none` 이라 읽어 주는 도구에서 중복되지 않는다.
+     *
+     * 위로(`bottom-full`) 띄운다. 게시글 본문 카드와 댓글 영역 어느 쪽에도
+     * `overflow-hidden` 이 없어 잘리지 않는다(확인함).
+     *
+     * @param  string  $textExpr  표시할 문구. `$t:` 키 또는 `{{…}}` 표현식
+     * @return array<string, mixed>
+     */
+    private function tooltipNode(string $textExpr): array
+    {
+        return [
+            'type' => 'basic',
+            'name' => 'Span',
+            'props' => [
+                'className' => 'pointer-events-none invisible absolute bottom-full left-1/2 z-50 mb-1 '
+                    .'-translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs '
+                    .'font-normal text-white opacity-0 transition-opacity '
+                    .'group-hover:visible group-hover:opacity-100 '
+                    .'dark:bg-gray-700',
+                'aria-hidden' => 'true',
+            ],
+            'text' => $textExpr,
+        ];
     }
 
     /**
@@ -710,7 +750,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                 'type' => 'button',
                 'className' => $className,
                 'disabled' => '{{!!('.$isOwnExpr.')}}',
-                'title' => $label,
                 'aria-label' => $label,
                 'aria-pressed' => '{{('.$mineExpr.") === '".$reaction."'}}",
             ],
@@ -726,6 +765,12 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'props' => ['className' => 'text-xs font-medium leading-none'],
                     'text' => '{{'.$countExpr.' ?? 0}}',
                 ],
+                // 본인 글·본인 댓글이면 왜 못 누르는지를 툴팁이 대신 말한다.
+                // 비활성 버튼도 `:hover` 는 받으므로 툴팁은 그대로 뜬다.
+                // ⚠ `$t:` 는 PHP 이중따옴표 안에서 변수 보간으로 먹히므로 홑따옴표로만 잇는다.
+                $this->tooltipNode(
+                    '{{('.$isOwnExpr.') ? \'$t:g7-forum-addon.self_vote_blocked\' : \''.$label.'\'}}'
+                ),
             ],
             'actions' => [
                 [
@@ -787,7 +832,6 @@ class BoardShowWidgetListener implements HookListenerInterface
             'props' => [
                 'type' => 'button',
                 'className' => $this->squareButtonClass().($on ? $onCls : $offCls),
-                'title' => $labelKey,
                 'aria-label' => $labelKey,
                 'aria-pressed' => $on ? 'true' : 'false',
             ],
@@ -797,6 +841,7 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'name' => 'Icon',
                     'props' => ['name' => $icon, 'ariaLabel' => $labelKey],
                 ],
+                $this->tooltipNode($labelKey),
             ],
             'actions' => [
                 [
@@ -1209,7 +1254,7 @@ class BoardShowWidgetListener implements HookListenerInterface
     }
 
     /**
-     * 댓글 본문 아래에 붙는 리액션 바 노드.
+     * 댓글 본문 아래에 붙는 추천·채택 버튼 바 노드.
      *
      * 삭제·블라인드·수정중 댓글에는 숨긴다. 포럼 게시판에서만 렌더. 데이터는
      * `forum_meta.data.comment_reactions[comment.id]` 에서 읽는다.
@@ -1222,13 +1267,65 @@ class BoardShowWidgetListener implements HookListenerInterface
         $bar['id'] = self::COMMENT_REACTIONS_ID;
         $bar['if'] = "{{(!comment?.deleted_at || comment?.is_cascade_deleted) && comment?.status !== 'blinded' && _global?.commentEdit?.editingCommentId !== comment?.id && post?.data?.board?.type === 'forum'}}";
 
+        // 채택(베스트답글) 토글을 추천 버튼 바로 옆에 같은 정사각으로 둔다.
+        // 표시 조건과 동작은 종전 텍스트 버튼과 같다 — 노출 판정식도 그대로다.
+        $bar['children'][] = $this->commentAcceptToggleButton(false);
+        $bar['children'][] = $this->commentAcceptToggleButton(true);
+
         return $bar;
     }
 
     /**
-     * 컴포넌트 트리를 재귀 순회하며, 렌더된 댓글 본문 `<P>` 노드 **직후**에 채택(베스트답글)
-     * 배지/버튼 행을 splice 한다. (리액션 바보다 먼저 splice 호출되므로 `<P>` 바로 뒤 =
-     * 리액션 바 위에 온다.)
+     * 댓글의 채택/채택취소 토글 버튼 1개 (40px 정사각).
+     *
+     * 추천 업·다운과 같은 줄, 같은 크기다. 아이콘은 `circle-check` 하나이고
+     * **채택된 상태는 초록으로 채워** 구분하며 `aria-pressed` 로도 알린다.
+     * 같은 자리에 두 버튼 중 하나만 렌더된다(위젯의 핀·잠금과 같은 방식).
+     *
+     * 노출 조건은 1.2.0 의 텍스트 버튼에서 **그대로 가져왔다** — 글 작성자 본인이거나
+     * 사이트 관리자일 때만 보인다. 서버(`AcceptedReplyController`)의 권한도 그대로다.
+     * 이 변경은 모양만 바꾼다.
+     *
+     * @param  bool  $on  true=채택취소 버튼(채택된 상태에서 표시), false=채택 버튼
+     * @return array<string, mixed>
+     */
+    private function commentAcceptToggleButton(bool $on): array
+    {
+        $canManage = '(post?.data?.is_owner || _global.currentUser?.is_admin)';
+        $isAccepted = 'forum_meta?.data?.accepted_reply_id === comment?.id';
+        $labelKey = $on ? '$t:g7-forum-addon.unaccept_button' : '$t:g7-forum-addon.accept_button';
+
+        $onCls = 'cursor-pointer border-green-600 bg-green-600 text-white hover:bg-green-700 '
+            .'dark:border-green-500 dark:bg-green-500 dark:hover:bg-green-400';
+        $offCls = 'cursor-pointer border-green-300 bg-white text-green-700 hover:bg-green-50 '
+            .'dark:border-green-700 dark:bg-gray-800 dark:text-green-300 dark:hover:bg-green-900/30';
+
+        return [
+            'type' => 'basic',
+            'name' => 'Button',
+            'if' => '{{'.$canManage.' && '.($on ? $isAccepted : '!('.$isAccepted.')').'}}',
+            'props' => [
+                'type' => 'button',
+                'className' => $this->squareButtonClass().($on ? $onCls : $offCls),
+                'aria-label' => $labelKey,
+                'aria-pressed' => $on ? 'true' : 'false',
+            ],
+            'children' => [
+                [
+                    'type' => 'composite',
+                    'name' => 'Icon',
+                    'props' => ['name' => 'circle-check', 'ariaLabel' => $labelKey],
+                ],
+                $this->tooltipNode($labelKey),
+            ],
+            'actions' => [$this->acceptAction($on ? 'unaccept' : 'accept')],
+        ];
+    }
+
+    /**
+     * 컴포넌트 트리를 재귀 순회하며, 렌더된 댓글 본문 `<P>` 노드 **직후**에 "채택됨"
+     * 표시 줄을 splice 한다. (리액션 바보다 나중에 splice 호출되므로 `<P>` 바로 뒤 =
+     * 추천·채택 버튼 바 위에 온다.)
      *
      * @param  array<int, mixed>  $nodes
      * @param  int  $applied  (참조) 적용 횟수
@@ -1255,32 +1352,27 @@ class BoardShowWidgetListener implements HookListenerInterface
     }
 
     /**
-     * 댓글 본문 아래에 붙는 채택(베스트답글) 배지 + 버튼 행.
+     * 댓글 본문 아래에 붙는 "채택됨" 표시 줄.
      *
-     * - "✅ 채택된 답변" 배지: 이 댓글이 채택된 답변이면 모두에게 표시.
-     * - "채택하기" 버튼: 뷰어가 글 작성자 본인 또는 사이트 관리자이고, 이 댓글이 아직
-     *   채택 상태가 아닐 때.
-     * - "채택 해제" 버튼: 위 권한 + 이 댓글이 현재 채택 상태일 때.
+     * 이 댓글이 채택된 답변이면 **모두에게** 보인다(권한 무관). 채택·취소 버튼은
+     * 1.3.0 에서 추천 바로 옮겨 정사각 토글이 됐다 —
+     * {@see commentAcceptToggleButton}. 여기는 표시 전용이다.
      *
-     * 클릭 → `apiCall` → `refetchDataSource: forum_meta` (새로고침 없이 갱신).
      * 삭제·블라인드·수정중 댓글엔 숨김, 포럼 게시판에서만 렌더.
      *
      * @return array<string, mixed>
      */
     private function acceptedReplyNode(): array
     {
-        $canManage = '(post?.data?.is_owner || _global.currentUser?.is_admin)';
         $isAccepted = 'forum_meta?.data?.accepted_reply_id === comment?.id';
         $visibleBase = "(!comment?.deleted_at || comment?.is_cascade_deleted) && comment?.status !== 'blinded'"
             ." && _global?.commentEdit?.editingCommentId !== comment?.id && post?.data?.board?.type === 'forum'";
-
-        $btnBase = 'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium transition-colors cursor-pointer ';
 
         return [
             'id' => self::ACCEPTED_REPLY_ID,
             'type' => 'basic',
             'name' => 'Div',
-            'if' => '{{'.$visibleBase.' && ('.$isAccepted.' || '.$canManage.')}}',
+            'if' => '{{'.$visibleBase.' && '.$isAccepted.'}}',
             'props' => ['className' => 'mt-2 flex flex-wrap items-center gap-2'],
             'children' => [
                 [
@@ -1289,7 +1381,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                     // 색을 구분하기 어려운 환경에서 무엇을 뜻하는지 알 수 없다.
                     'type' => 'basic',
                     'name' => 'Span',
-                    'if' => '{{'.$isAccepted.'}}',
                     'props' => [
                         'className' => 'inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300',
                     ],
@@ -1305,30 +1396,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                             'text' => '$t:g7-forum-addon.accepted_badge',
                         ],
                     ],
-                ],
-                [
-                    // 채택하기 — 작성자/관리자 + 아직 미채택.
-                    'type' => 'basic',
-                    'name' => 'Button',
-                    'if' => '{{'.$canManage.' && !('.$isAccepted.')}}',
-                    'props' => [
-                        'type' => 'button',
-                        'className' => $btnBase.'border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-300 dark:hover:bg-green-900/30',
-                    ],
-                    'text' => '$t:g7-forum-addon.accept_button',
-                    'actions' => [$this->acceptAction('accept')],
-                ],
-                [
-                    // 채택 해제 — 작성자/관리자 + 현재 채택된 댓글.
-                    'type' => 'basic',
-                    'name' => 'Button',
-                    'if' => '{{'.$canManage.' && '.$isAccepted.'}}',
-                    'props' => [
-                        'type' => 'button',
-                        'className' => $btnBase.'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700',
-                    ],
-                    'text' => '$t:g7-forum-addon.unaccept_button',
-                    'actions' => [$this->acceptAction('unaccept')],
                 ],
             ],
         ];

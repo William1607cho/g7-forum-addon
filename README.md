@@ -71,8 +71,16 @@ post API (since 1.1.1).
   right edge. The row never wraps — only the badge group may wrap or shrink — so
   the four buttons stay on one line at phone width.
 - **Equal squares.** Every button is `w-10 h-10` (40px). Votes stack an icon over
-  their count; pin and lock are icon-only and name themselves through `title` and
-  `aria-label`. An active toggle is filled and sets `aria-pressed`.
+  their count; pin and lock are icon-only. An active toggle is filled and sets
+  `aria-pressed`.
+- **Tooltips.** Every button — in the widget and under each comment — shows its
+  name on hover, immediately. This is a drawn tooltip (`group-hover:` on the
+  button), not the browser's `title`, which waits about a second; `title` is not
+  set at all, because both would appear. `aria-label` still carries the name for
+  assistive tech. A disabled vote button says *why* it is disabled.
+- **Under each comment** the same square buttons appear: upvote, downvote, and —
+  for whoever may accept — an accept / unaccept toggle (`circle-check`, filled
+  green when accepted).
 
 ### Icons
 
@@ -85,7 +93,7 @@ present in the deployed subset are used:
 | Upvote / downvote | `chevron-up` / `chevron-down` | the subset has no `caret-*` |
 | Pin | `bullhorn` | no `thumbtack`; a pin here *is* the core notice flag |
 | Lock (both states) | `lock` | no `lock-open` / `unlock` — state is shown by fill, not shape |
-| Accepted mark | `circle-check` | |
+| Accept / unaccept, accepted mark | `circle-check` | |
 
 If you run this plugin on a template with the full Font Awesome, swapping these
 names is a one-line change per icon in `BoardShowWidgetListener`.
@@ -314,6 +322,15 @@ other Gnuboard7 plugins.)
     업·다운 `chevron-up`/`chevron-down`(`caret-*` 없음), 고정 `bullhorn`(`thumbtack` 없음;
     이 기능의 실체가 코어 공지라 뜻이 어긋나지 않습니다), 잠금 `lock`(`lock-open` 이 없어
     상태는 모양이 아니라 색으로 구분). **템플릿은 수정하지 않습니다.**
+- **툴팁** *(1.3.0)*: 본글 위젯과 댓글 바의 **모든 버튼**에 마우스를 올리면 이름이 곧바로
+  뜹니다. 브라우저 기본 툴팁(`title`)은 1초쯤 기다려야 떠서 아이콘만 있는 버튼 줄에는
+  맞지 않아, `group-hover:` 로 직접 그립니다. `title` 은 **넣지 않습니다** — 같이 두면
+  두 번 뜹니다. 접근성은 `aria-label` 이 그대로 담당합니다. 본인 글·댓글이라 비활성인
+  추천 버튼에는 "본인 글에는 추천할 수 없습니다" 가 뜹니다.
+- **댓글 채택 버튼** *(1.3.0)*: 텍스트 버튼이던 "채택하기" 를 추천 버튼 옆에 같은 40px
+  정사각으로 옮겼습니다(아이콘 `circle-check`). 채택된 상태는 초록으로 채우고
+  `aria-pressed` 로 알립니다. **누가 채택할 수 있는지와 동작은 그대로입니다** — 판정식도
+  엔드포인트도 권한도 바뀌지 않았고, 버튼 자리만 옮겼습니다.
 - **채택 답변 강조** *(1.3.0)*: 채택된 댓글은 행 전체에 초록 테두리·배경이 들어가고,
   "채택됨" 표시가 권한과 무관하게 모두에게 보입니다. 다크 모드에서도 같은 계열로 읽힙니다.
   강조는 `after_apply` 가 넘겨준 트리에서 댓글 행 컨테이너의 `className` 만 바꾸는

@@ -1,17 +1,18 @@
 {
   "pinned_badge": "Pinned",
   "locked_badge": "Locked",
-  "pin_button": "Pin this post",
-  "unpin_button": "Unpin this post",
-  "lock_button": "Lock this thread",
-  "unlock_button": "Unlock this thread",
+  "pin_button": "Pin as notice",
+  "unpin_button": "Unpin",
+  "lock_button": "Lock",
+  "unlock_button": "Unlock",
   "locked_comment_notice": "🔒 This thread is locked. New comments are not allowed.",
   "reaction_up": "Upvote",
   "reaction_down": "Downvote",
   "accepted_badge": "Accepted",
-  "accept_button": "Accept",
+  "accept_button": "Accept answer",
   "unaccept_button": "Unaccept",
   "widget_has_accepted": "Has an accepted answer",
   "list_participants_header": "Participants",
-  "list_last_activity_header": "Last Activity"
+  "list_last_activity_header": "Last Activity",
+  "self_vote_blocked": "You cannot vote on your own post"
 }

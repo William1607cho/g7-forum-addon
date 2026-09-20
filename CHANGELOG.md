@@ -102,6 +102,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alone. Rows that are not accepted get a transparent border of the same width so
   nothing shifts when the highlight appears.
 
+- **Every button in the widget and under each comment now explains itself on
+  hover.** The buttons are icon-only, so the name had to come from somewhere; the
+  browser's own `title` tooltip waits about a second before appearing, which is a
+  second of not knowing what four identical squares do. A small tooltip is drawn
+  instead and appears immediately. `title` is deliberately *not* set as well —
+  both would show. `aria-label` still carries the name for assistive tech, and
+  the tooltip itself is `aria-hidden` and `pointer-events-none`.
+
+  The disabled vote buttons get a tooltip too, saying why they are disabled
+  rather than leaving the reader to guess — a disabled button still receives
+  `:hover`.
+
+- **The comment's "Accept" button is now a square next to the votes.** It was a
+  text button on its own row; it is now the same 40px square as everything else,
+  sitting beside the up/down buttons, with `circle-check` for an icon. An
+  accepted answer's toggle is filled green and reports `aria-pressed`. The row
+  that used to hold it now carries only the "Accepted" mark.
+
+  **Who may accept, and what accepting does, are unchanged** — same condition,
+  same endpoint, same permission. This moves a button; it does not touch the API.
+
 ### Fixed
 
 - **The widget is no longer empty on a secret post for people who can read it.**
