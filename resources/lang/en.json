@@ -14,5 +14,6 @@
   "widget_has_accepted": "Has an accepted answer",
   "list_participants_header": "Participants",
   "list_last_activity_header": "Last Activity",
-  "self_vote_blocked": "You cannot vote on your own post"
+  "self_vote_blocked": "You cannot vote on your own post",
+  "login_required_to_vote": "Sign in to vote"
 }

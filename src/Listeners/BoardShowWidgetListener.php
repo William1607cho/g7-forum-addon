@@ -721,27 +721,46 @@ class BoardShowWidgetListener implements HookListenerInterface
         $icon = self::REACTION_ICON[$reaction];
         $label = self::REACTION_LABEL_KEY[$reaction];
 
+        // 로그인 여부. 템플릿이 쓰는 것과 같은 신호다(`_comment_item.json` 의 비회원
+        // 댓글 폼 분기도 `!_global.currentUser?.uuid` 로 판정한다).
+        $loggedIn = '_global.currentUser?.uuid';
+
         if ($scope === 'post') {
             $countExpr = "forum_meta?.data?.reactions?.counts?.".$reaction;
             $mineExpr = 'forum_meta?.data?.reactions?.mine';
             $target = '/api/plugins/g7-forum-addon/posts/{{route?.id}}/reactions';
-            $isOwnExpr = 'post?.data?.is_owner';
+            $ownerFlag = 'post?.data?.is_owner';
         } else {
             $base = "forum_meta?.data?.comment_reactions?.[comment?.id]";
             $countExpr = $base.'?.counts?.'.$reaction;
             $mineExpr = $base.'?.mine';
             $target = '/api/plugins/g7-forum-addon/comments/{{comment?.id}}/reactions';
-            $isOwnExpr = 'comment?.is_author';
+            $ownerFlag = 'comment?.is_author';
         }
 
-        // cursor 는 세 분기 각각에 넣는다 — 기본 클래스에 `cursor-pointer` 를 두고
+        // "본인 것" 판정에 로그인 여부를 함께 건다. 서버는 소유자가 없는 대상
+        // (`user_id = null`, 비회원 글·댓글)에는 본인 판정을 적용하지 않는데,
+        // 코어 `CommentResource` 의 `is_author` 는 `Auth::id() === user_id` 라서
+        // **비회원이 비회원 댓글을 볼 때 `null === null` 로 참**이 된다. 그대로 쓰면
+        // 비회원에게 "본인 글" 문구가 나가므로 여기서 막는다.
+        $isOwnExpr = '('.$loggedIn.' && '.$ownerFlag.')';
+
+        // 추천 자체가 불가능한 사용자 = 비회원. 서버는 라우트 `auth:sanctum` 과
+        // 컨트롤러 양쪽에서 비회원을 401 로 막는다.
+        $cannotVoteExpr = '!'.$loggedIn;
+
+        // cursor 는 분기 각각에 넣는다 — 기본 클래스에 `cursor-pointer` 를 두고
         // 분기에서 `cursor-not-allowed` 를 얹으면 두 유틸리티가 같은 특정도로 겹쳐
         // 어느 쪽이 이길지 Tailwind 출력 순서에 달리게 된다.
         $activeCls = "cursor-pointer border-blue-500 bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-500";
         $idleCls = "cursor-pointer border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700";
-        $ownCls = "cursor-not-allowed border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 opacity-60";
+        // 본인 글이든 비회원이든 **같은** 비활성 표시를 쓴다. 숫자는 그대로 읽힌다.
+        $blockedCls = "cursor-not-allowed border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 opacity-60";
+
+        $blockedExpr = '('.$isOwnExpr.' || '.$cannotVoteExpr.')';
+
         $className = $this->squareButtonClass().'flex-col gap-0.5 '
-            ."{{ (".$isOwnExpr.") ? '".$ownCls."' : ((".$mineExpr.") === '".$reaction."' ? '".$activeCls."' : '".$idleCls."') }}";
+            ."{{ ".$blockedExpr." ? '".$blockedCls."' : ((".$mineExpr.") === '".$reaction."' ? '".$activeCls."' : '".$idleCls."') }}";
 
         return [
             'type' => 'basic',
@@ -749,7 +768,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             'props' => [
                 'type' => 'button',
                 'className' => $className,
-                'disabled' => '{{!!('.$isOwnExpr.')}}',
+                'disabled' => '{{!!'.$blockedExpr.'}}',
                 'aria-label' => $label,
                 'aria-pressed' => '{{('.$mineExpr.") === '".$reaction."'}}",
             ],
@@ -765,11 +784,13 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'props' => ['className' => 'text-xs font-medium leading-none'],
                     'text' => '{{'.$countExpr.' ?? 0}}',
                 ],
-                // 본인 글·본인 댓글이면 왜 못 누르는지를 툴팁이 대신 말한다.
+                // 왜 못 누르는지를 툴팁이 대신 말한다. 우선순위는 본인 글 → 로그인 필요.
                 // 비활성 버튼도 `:hover` 는 받으므로 툴팁은 그대로 뜬다.
                 // ⚠ `$t:` 는 PHP 이중따옴표 안에서 변수 보간으로 먹히므로 홑따옴표로만 잇는다.
                 $this->tooltipNode(
-                    '{{('.$isOwnExpr.') ? \'$t:g7-forum-addon.self_vote_blocked\' : \''.$label.'\'}}'
+                    '{{'.$isOwnExpr.' ? \'$t:g7-forum-addon.self_vote_blocked\''
+                    .' : ('.$cannotVoteExpr.' ? \'$t:g7-forum-addon.login_required_to_vote\''
+                    .' : \''.$label.'\')}}'
                 ),
             ],
             'actions' => [

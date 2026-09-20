@@ -123,6 +123,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Who may accept, and what accepting does, are unchanged** — same condition,
   same endpoint, same permission. This moves a button; it does not touch the API.
 
+- **Vote buttons are disabled for anyone who cannot vote, not just for the
+  author.** A signed-out visitor saw two live-looking buttons that answered
+  "authentication required" on click. They are now greyed out the same way the
+  author's own buttons are — counts still readable — and the tooltip says to sign
+  in. The author's message wins when both apply.
+
+  The signed-in check is also folded into the "your own" test. The core's
+  `is_author` is `Auth::id() === user_id`, which is `null === null`, i.e. **true**,
+  for a signed-out visitor looking at a guest comment; without the extra check
+  such a visitor was told it was their own comment. The server never applies the
+  own-target rule to a target with no owner, so this now matches it.
+
 ### Fixed
 
 - **The widget is no longer empty on a secret post for people who can read it.**

@@ -77,7 +77,9 @@ post API (since 1.1.1).
   name on hover, immediately. This is a drawn tooltip (`group-hover:` on the
   button), not the browser's `title`, which waits about a second; `title` is not
   set at all, because both would appear. `aria-label` still carries the name for
-  assistive tech. A disabled vote button says *why* it is disabled.
+  assistive tech. A disabled vote button says *why* it is disabled — "sign in to
+  vote" for a signed-out visitor, "you cannot vote on your own post" for the
+  author, the author's message winning when both apply.
 - **Under each comment** the same square buttons appear: upvote, downvote, and —
   for whoever may accept — an accept / unaccept toggle (`circle-check`, filled
   green when accepted).
@@ -326,7 +328,9 @@ other Gnuboard7 plugins.)
   뜹니다. 브라우저 기본 툴팁(`title`)은 1초쯤 기다려야 떠서 아이콘만 있는 버튼 줄에는
   맞지 않아, `group-hover:` 로 직접 그립니다. `title` 은 **넣지 않습니다** — 같이 두면
   두 번 뜹니다. 접근성은 `aria-label` 이 그대로 담당합니다. 본인 글·댓글이라 비활성인
-  추천 버튼에는 "본인 글에는 추천할 수 없습니다" 가 뜹니다.
+  추천 버튼에는 이유가 뜹니다 — 비회원이면 "로그인 후 추천할 수 있습니다",
+  본인 글·댓글이면 "본인 글에는 추천할 수 없습니다"(둘 다면 본인 문구가 우선).
+  추천할 수 없는 사용자에게는 버튼이 같은 비활성 표시가 되고 숫자는 그대로 읽힙니다.
 - **댓글 채택 버튼** *(1.3.0)*: 텍스트 버튼이던 "채택하기" 를 추천 버튼 옆에 같은 40px
   정사각으로 옮겼습니다(아이콘 `circle-check`). 채택된 상태는 초록으로 채우고
   `aria-pressed` 로 알립니다. **누가 채택할 수 있는지와 동작은 그대로입니다** — 판정식도

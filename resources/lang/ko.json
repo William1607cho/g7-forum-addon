@@ -14,5 +14,6 @@
   "widget_has_accepted": "채택된 답변 있음",
   "list_participants_header": "참여자",
   "list_last_activity_header": "최근 활동",
-  "self_vote_blocked": "본인 글에는 추천할 수 없습니다"
+  "self_vote_blocked": "본인 글에는 추천할 수 없습니다",
+  "login_required_to_vote": "로그인 후 추천할 수 있습니다"
 }

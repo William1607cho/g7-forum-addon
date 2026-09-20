@@ -139,6 +139,90 @@ class WidgetLayoutTest extends PluginTestCase
         }
     }
 
+    // ── 추천 불가 사용자 ─────────────────────────────────────
+
+    /**
+     * @return array<int, array<string, mixed>> 추천 버튼(정사각 + 세로 쌓기)만
+     */
+    private function voteButtons(string $method): array
+    {
+        return array_values(array_filter(
+            $this->buttons($this->node($method)),
+            fn ($n) => str_contains((string) ($n['props']['className'] ?? ''), 'flex-col')
+        ));
+    }
+
+    public function test_vote_buttons_are_disabled_for_guests_and_for_the_author(): void
+    {
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
+            foreach ($this->voteButtons($method) as $button) {
+                $disabled = (string) ($button['props']['disabled'] ?? '');
+
+                // 비회원 판정과 본인 판정이 모두 비활성 조건에 들어가야 한다.
+                $this->assertStringContainsString('!_global.currentUser?.uuid', $disabled, $method);
+                $this->assertMatchesRegularExpression(
+                    '/is_owner|is_author/',
+                    $disabled,
+                    $method.' 비활성 조건에 본인 판정이 있어야 한다'
+                );
+            }
+        }
+    }
+
+    public function test_own_check_requires_being_signed_in(): void
+    {
+        // 코어 CommentResource 의 `is_author` 는 `Auth::id() === user_id` 라서 비회원이
+        // 비회원 댓글을 볼 때 `null === null` 로 참이 된다. 로그인 여부를 함께 걸지
+        // 않으면 비회원에게 "본인 글" 문구가 나간다.
+        foreach ($this->voteButtons('commentReactionBarNode') as $button) {
+            $disabled = (string) ($button['props']['disabled'] ?? '');
+            $this->assertStringContainsString(
+                '_global.currentUser?.uuid && comment?.is_author',
+                $disabled
+            );
+        }
+    }
+
+    public function test_tooltip_prefers_the_own_post_message_over_the_sign_in_message(): void
+    {
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
+            foreach ($this->voteButtons($method) as $button) {
+                $tooltip = '';
+                foreach ($button['children'] ?? [] as $child) {
+                    if (is_array($child)
+                        && str_contains((string) ($child['props']['className'] ?? ''), 'group-hover:visible')) {
+                        $tooltip = (string) ($child['text'] ?? '');
+                    }
+                }
+
+                $own = strpos($tooltip, 'self_vote_blocked');
+                $login = strpos($tooltip, 'login_required_to_vote');
+
+                $this->assertNotFalse($own, $method);
+                $this->assertNotFalse($login, $method);
+                $this->assertLessThan($login, $own, $method.' 본인 문구가 먼저 판정돼야 한다');
+            }
+        }
+    }
+
+    public function test_manager_toggles_are_not_affected_by_the_sign_in_check(): void
+    {
+        // 채택·고정·잠금의 표시 조건은 이번 변경 대상이 아니다.
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
+            foreach ($this->buttons($this->node($method)) as $button) {
+                if (str_contains((string) ($button['props']['className'] ?? ''), 'flex-col')) {
+                    continue; // 추천 버튼은 제외
+                }
+                $this->assertArrayNotHasKey('disabled', $button['props'], $method);
+                $this->assertStringNotContainsString(
+                    'login_required_to_vote',
+                    json_encode($button, JSON_UNESCAPED_UNICODE),
+                    $method
+                );
+            }
+        }
+    }
+
     // ── 채택 버튼 이동 ───────────────────────────────────────
 
     public function test_accept_toggle_lives_in_the_comment_bar_not_the_badge_row(): void
