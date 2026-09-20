@@ -5,11 +5,11 @@
         "ko": "포럼게시판 애드온",
         "en": "Forum Board Add-on"
     },
-    "version": "1.2.0",
+    "version": "1.3.0",
     "license": "MIT",
     "description": {
-        "ko": "sirsoft-board 게시판에 포럼형(forum) 유형을 더하고, 그 위에 추천(리액션)·베스트답글(채택)·잠금·게시판 목록 참여자 표시 등 포럼 기능을 얹는 애드온입니다. sirsoft-board 와 템플릿(sirsoft-basic)은 전혀 수정하지 않으며, 애드온 전용 테이블·API·레이아웃 확장으로만 동작합니다. 태그·멘션·구독은 아직 미구현입니다.",
-        "en": "Adds a forum-type board to sirsoft-board and layers forum features (reactions, best answer/accepted reply, lock, board-list participant display) on top. sirsoft-board and the sirsoft-basic template are never modified; the add-on works only through its own tables, API and layout extensions. Tags, mentions and subscriptions are not implemented yet."
+        "ko": "sirsoft-board 게시판에 포럼형(forum) 유형을 더하고, 그 위에 추천(업·다운)·베스트답글(채택)·글 고정(핀)·잠금·게시판 목록 참여자 표시 등 포럼 기능을 얹는 애드온입니다. sirsoft-board 와 템플릿(sirsoft-basic)은 전혀 수정하지 않으며, 애드온 전용 테이블·API·레이아웃 확장으로만 동작합니다. 글 고정은 애드온이 따로 저장하지 않고 코어 공지 값(board_posts.is_notice)을 그대로 씁니다. 태그·멘션·구독은 아직 미구현입니다.",
+        "en": "Adds a forum-type board to sirsoft-board and layers forum features (up/down votes, best answer/accepted reply, pin, lock, board-list participant display) on top. sirsoft-board and the sirsoft-basic template are never modified; the add-on works only through its own tables, API and layout extensions. Pinning stores nothing of its own \u2014 it drives the core notice flag (board_posts.is_notice). Tags, mentions and subscriptions are not implemented yet."
     },
     "g7_version": ">=7.0.10",
     "dependencies": {

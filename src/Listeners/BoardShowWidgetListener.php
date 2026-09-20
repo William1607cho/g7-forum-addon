@@ -84,13 +84,22 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 위 라벨 표현식의 forum 대응 버전 */
     private const REPLIES_TOGGLE_LABEL_PATCHED = '{{!(_local.collapsedReplies?.[comment?.id] ?? (post?.data?.board?.type === \'forum\' ? false : true)) ? \'$t:board.hide_replies\' : \'$t:board.show_replies\'}} ({{comment?.replies_count}})';
 
-    /** 리액션 종류 → 이모지 (순서 = 표시 순서, ReactionStore::REACTIONS 와 일치) */
-    private const REACTION_EMOJI = [
-        'like' => '👍',
-        'love' => '❤️',
-        'haha' => '😂',
-        'wow' => '😮',
-        'sad' => '😢',
+    /**
+     * 추천 종류 → 버튼 글리프 (순서 = 표시 순서, ReactionStore::REACTIONS 와 일치).
+     *
+     * 아이콘 컴포넌트 대신 문자 글리프를 쓴다 — 아이콘 이름이 템플릿의 아이콘 세트에
+     * 없으면 조용히 빈칸으로 렌더되는데, 이 버튼은 숫자 옆의 유일한 표식이라 비면
+     * 업/다운을 구분할 수 없다. 글리프는 세트와 무관하게 항상 그려진다.
+     */
+    private const REACTION_GLYPH = [
+        'up' => '▲',
+        'down' => '▼',
+    ];
+
+    /** 추천 종류 → 접근성 라벨 키 (title 속성) */
+    private const REACTION_LABEL_KEY = [
+        'up' => '$t:g7-forum-addon.reaction_up',
+        'down' => '$t:g7-forum-addon.reaction_down',
     ];
 
     public static function getSubscribedHooks(): array
@@ -405,9 +414,10 @@ class BoardShowWidgetListener implements HookListenerInterface
     /**
      * 주입할 위젯 노드.
      *
-     * 아직 대부분 자리표시자 텍스트지만, 고정(공지) 배지는 실제 데이터로 렌더한다 —
-     * `forum_meta.data.is_notice`(원천: sirsoft-board `board_posts.is_notice`)가 참이면
-     * "📌 고정됨" 배지를 앞에 붙인다. board_type 게이팅은 위젯 노드 전체 `if` 로 유지.
+     * 1.3.0 에서 자리표시자 문구를 걷어냈다 — 배지(고정/잠금/채택), 관리자급 버튼
+     * (핀·잠금), 추천 업·다운 바, 채택 답변 박스가 모두 실제 데이터로 렌더된다.
+     * 고정 배지의 원천은 `forum_meta.data.is_notice`(= sirsoft-board
+     * `board_posts.is_notice`)다. board_type 게이팅은 위젯 노드 전체 `if` 로 유지.
      *
      * @return array<string, mixed>
      */
@@ -452,17 +462,15 @@ class BoardShowWidgetListener implements HookListenerInterface
                     ],
                     'text' => '$t:g7-forum-addon.widget_has_accepted',
                 ],
-                [
-                    'type' => 'basic',
-                    'name' => 'Span',
-                    'props' => ['className' => 'font-medium'],
-                    'text' => '$t:g7-forum-addon.widget_placeholder',
-                ],
-                // 관리자 전용 잠금/해제 토글 — 사이트 관리자에게만 노출.
-                // API 인가는 서버(AdminBaseController: auth:sanctum + admin)가 최종 판정.
+                // 관리자급 전용 핀/잠금 토글 — `post.data.abilities.can_manage`
+                // (= `sirsoft-board.{slug}.manager`) 로 노출한다. 서버가 같은 식별자로
+                // 최종 판정하므로 화면과 판정이 갈리지 않는다. 배지 줄 오른쪽에 모인다
+                // (그룹의 첫 버튼인 핀에 `ml-auto`).
+                $this->pinToggleButton(false),
+                $this->pinToggleButton(true),
                 $this->lockToggleButton(false),
                 $this->lockToggleButton(true),
-                // 게시글 리액션 바 (5종 이모지, 로그인 사용자 클릭 시 토글).
+                // 게시글 추천 바 (업·다운, 로그인 사용자 클릭 시 토글). `w-full` 이라 새 줄.
                 $this->reactionBar('post'),
                 // 채택된 답변 전문 박스 — forum_meta.data.accepted_reply 가 있을 때만.
                 // `w-full` 로 flex-wrap 컨테이너 안에서 강제 줄바꿈(새 행)시킨다.
@@ -561,7 +569,7 @@ class BoardShowWidgetListener implements HookListenerInterface
     private function reactionBar(string $scope): array
     {
         $buttons = [];
-        foreach (array_keys(self::REACTION_EMOJI) as $reaction) {
+        foreach (array_keys(self::REACTION_GLYPH) as $reaction) {
             $buttons[] = $this->reactionButton($scope, $reaction);
         }
 
@@ -579,31 +587,49 @@ class BoardShowWidgetListener implements HookListenerInterface
     }
 
     /**
-     * 리액션 버튼 1개.
+     * 추천 버튼 1개 (업 또는 다운).
+     *
+     * ── 본인 글·본인 댓글 (1.3.0) ────────────────────────────────
+     * 자기 글/댓글에는 투표할 수 없다. 버튼을 감추지 않고 `disabled` 로 두는 이유는,
+     * 감추면 업/다운 숫자까지 사라져 작성자만 자기 글의 점수를 못 보게 되기 때문이다.
+     * 판정은 코어가 이미 내려주는 값을 쓴다 — 게시글은 `post.data.is_owner`
+     * (`BaseApiResource::resourceMeta`), 댓글은 `comment.is_author`
+     * (`CommentResource`). 서버도 같은 조건을 403 으로 막으므로 이 비활성화는 안내용이다.
+     *
+     * ── 개수 표시 ────────────────────────────────────────────────
+     * 업·다운 각각의 개수를 항상 숫자로 보여준다(0 이어도 숨기지 않는다) — 두 버튼이
+     * 나란히 있는데 한쪽만 숫자가 붙으면 어느 쪽이 0 인지 읽히지 않는다. 순점수
+     * (up − down)는 만들지 않는다.
      *
      * @param  string  $scope     'post' | 'comment'
-     * @param  string  $reaction  like|love|haha|wow|sad
+     * @param  string  $reaction  up|down
      * @return array<string, mixed>
      */
     private function reactionButton(string $scope, string $reaction): array
     {
-        $emoji = self::REACTION_EMOJI[$reaction];
+        $glyph = self::REACTION_GLYPH[$reaction];
 
         if ($scope === 'post') {
             $countExpr = "forum_meta?.data?.reactions?.counts?.".$reaction;
             $mineExpr = 'forum_meta?.data?.reactions?.mine';
             $target = '/api/plugins/g7-forum-addon/posts/{{route?.id}}/reactions';
+            $isOwnExpr = 'post?.data?.is_owner';
         } else {
             $base = "forum_meta?.data?.comment_reactions?.[comment?.id]";
             $countExpr = $base.'?.counts?.'.$reaction;
             $mineExpr = $base.'?.mine';
             $target = '/api/plugins/g7-forum-addon/comments/{{comment?.id}}/reactions';
+            $isOwnExpr = 'comment?.is_author';
         }
 
-        $activeCls = "border-blue-500 bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-500";
-        $idleCls = "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700";
-        $className = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs leading-none transition-colors cursor-pointer "
-            ."{{ (".$mineExpr.") === '".$reaction."' ? '".$activeCls."' : '".$idleCls."' }}";
+        // cursor 는 세 분기 각각에 넣는다 — 기본 클래스에 `cursor-pointer` 를 두고
+        // 분기에서 `cursor-not-allowed` 를 얹으면 두 유틸리티가 같은 특정도로 겹쳐
+        // 어느 쪽이 이길지 Tailwind 출력 순서에 달리게 된다.
+        $activeCls = "cursor-pointer border-blue-500 bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-500";
+        $idleCls = "cursor-pointer border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700";
+        $ownCls = "cursor-not-allowed border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 opacity-60";
+        $className = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs leading-none transition-colors "
+            ."{{ (".$isOwnExpr.") ? '".$ownCls."' : ((".$mineExpr.") === '".$reaction."' ? '".$activeCls."' : '".$idleCls."') }}";
 
         return [
             'type' => 'basic',
@@ -611,13 +637,14 @@ class BoardShowWidgetListener implements HookListenerInterface
             'props' => [
                 'type' => 'button',
                 'className' => $className,
+                'disabled' => '{{!!('.$isOwnExpr.')}}',
+                'title' => self::REACTION_LABEL_KEY[$reaction],
             ],
             'children' => [
-                ['type' => 'basic', 'name' => 'Span', 'text' => $emoji],
+                ['type' => 'basic', 'name' => 'Span', 'text' => $glyph],
                 [
                     'type' => 'basic',
                     'name' => 'Span',
-                    'if' => '{{('.$countExpr.' ?? 0) > 0}}',
                     'props' => ['className' => 'font-medium'],
                     'text' => '{{'.$countExpr.' ?? 0}}',
                 ],
@@ -641,7 +668,11 @@ class BoardShowWidgetListener implements HookListenerInterface
     }
 
     /**
-     * 위젯 안의 관리자용 잠금/해제 버튼 1개.
+     * 위젯 안의 관리자급 잠금/해제 버튼 1개.
+     *
+     * 1.3.0 에서 노출 조건을 `_global.currentUser.is_admin`(사이트 관리자)에서
+     * `post.data.abilities.can_manage`(= `sirsoft-board.{slug}.manager`)로 바꿨다.
+     * 서버(`PostLockController`)도 같은 식별자로 판정하므로 화면과 판정이 갈리지 않는다.
      *
      * @param  bool  $forUnlock  true=해제 버튼(잠겼을 때 표시), false=잠그기 버튼(안 잠겼을 때 표시)
      * @return array<string, mixed>
@@ -651,12 +682,69 @@ class BoardShowWidgetListener implements HookListenerInterface
         $visibleWhen = $forUnlock ? 'forum_meta?.data?.locked' : '!forum_meta?.data?.locked';
         $endpoint = $forUnlock ? 'unlock' : 'lock';
         $label = $forUnlock ? '$t:g7-forum-addon.unlock_button' : '$t:g7-forum-addon.lock_button';
+        $btnClass = 'inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer';
+
+        return [
+            'type' => 'basic',
+            'name' => 'Button',
+            'if' => '{{post?.data?.abilities?.can_manage && '.$visibleWhen.'}}',
+            'props' => [
+                'type' => 'button',
+                'className' => $btnClass,
+            ],
+            'text' => $label,
+            'actions' => [
+                [
+                    'type' => 'click',
+                    'handler' => 'apiCall',
+                    'auth_required' => true,
+                    'target' => '/api/plugins/g7-forum-addon/posts/{{route?.id}}/'.$endpoint,
+                    'params' => ['method' => 'POST'],
+                    'onSuccess' => [
+                        [
+                            'handler' => 'toast',
+                            'params' => ['type' => 'success', 'message' => '{{response?.message}}'],
+                        ],
+                        [
+                            'handler' => 'refetchDataSource',
+                            'params' => ['dataSourceId' => self::META_DS_ID],
+                        ],
+                    ],
+                    'onError' => [
+                        [
+                            'handler' => 'toast',
+                            'params' => ['type' => 'error', 'message' => '{{error.message}}'],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * 위젯 안의 관리자급 핀(고정)/고정해제 버튼 1개 (1.3.0 신규).
+     *
+     * 노출 조건은 잠금 버튼과 같은 `post.data.abilities.can_manage` 다. 현재 상태는
+     * `forum_meta.data.is_notice`(= 코어 `board_posts.is_notice`)로 읽으므로, 애드온이
+     * 따로 저장하는 값이 없다.
+     *
+     * 성공하면 `forum_meta` 를 다시 받아 배지가 갱신된다. 목록 상단 고정은 코어 목록
+     * 동작이라 목록 화면을 열 때 반영된다(상세 화면에서 목록을 다시 그리지 않는다).
+     *
+     * @param  bool  $forUnpin  true=고정해제 버튼(고정돼 있을 때 표시), false=고정 버튼
+     * @return array<string, mixed>
+     */
+    private function pinToggleButton(bool $forUnpin): array
+    {
+        $visibleWhen = $forUnpin ? 'forum_meta?.data?.is_notice' : '!forum_meta?.data?.is_notice';
+        $endpoint = $forUnpin ? 'unpin' : 'pin';
+        $label = $forUnpin ? '$t:g7-forum-addon.unpin_button' : '$t:g7-forum-addon.pin_button';
         $btnClass = 'ml-auto inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer';
 
         return [
             'type' => 'basic',
             'name' => 'Button',
-            'if' => '{{_global.currentUser?.is_admin && '.$visibleWhen.'}}',
+            'if' => '{{post?.data?.abilities?.can_manage && '.$visibleWhen.'}}',
             'props' => [
                 'type' => 'button',
                 'className' => $btnClass,
@@ -715,7 +803,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             'fallback' => [
                 'data' => [
                     'reactions' => [
-                        'counts' => ['like' => 0, 'love' => 0, 'haha' => 0, 'wow' => 0, 'sad' => 0],
+                        'counts' => ['up' => 0, 'down' => 0],
                         'total' => 0,
                         'mine' => null,
                     ],

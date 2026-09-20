@@ -5,6 +5,98 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Pin a post from the widget (`pin` / `unpin`).** A board manager can now pin a
+  forum post straight from the post widget, without opening the edit form.
+
+  A pin **is** the core notice flag. The add-on stores nothing of its own: the
+  new `POST posts/{id}/pin` and `POST posts/{id}/unpin` endpoints judge the
+  permission and then call `sirsoft-board`'s `PostService::updatePost()` with a
+  **single key, `is_notice`**. Everything the core already does for a notice —
+  top of page 1 of the list, SEO cache invalidation and regeneration, the
+  activity log entry — follows for free, and there is no second source of truth
+  to drift from the list ordering.
+
+  `is_secret`, `content`, `title` and `status` are protected by **not putting
+  their keys in the array**, not by writing their old values back: the core
+  repository passes the array straight to `$post->update()`, so a column that is
+  not in the array is not in the UPDATE statement. (Because `content` is absent,
+  the model's `saving` hook also skips recomputing the body thumbnail.)
+
+  Both endpoints are idempotent and answer with the resulting state
+  (`data.is_notice`). Replies (`parent_id` set) are refused with 422 — the core
+  notice query requires `parent_id IS NULL`, so pinning a reply would store a
+  value that never shows up anywhere.
+
+  `updated_at` does change. Forum list ordering is unaffected: `ActivityTime`
+  only ever looks at `created_at`.
+
+### Changed
+
+- **Emoji reactions are now up/down votes.** The five emoji reactions
+  (like / love / haha / wow / sad) are replaced by exactly two, `up` and `down`.
+  Sending any other value — including an old emoji name — is refused with 422.
+
+  One vote per person per target is unchanged and still enforced by the same
+  unique constraint: clicking the other side switches the vote, clicking the same
+  side again cancels it. The widget shows the up and down counts as two separate
+  numbers, always visible (including `0`); there is no net score.
+
+  **No schema change and no migration.** `reaction` is a free-form string column
+  and the allowed values live only in `ReactionStore::REACTIONS`. Both sites held
+  zero reaction rows at the time of the change, so there was nothing to convert.
+  A site that upgrades with existing emoji rows would keep those rows, but they
+  would no longer be counted or displayed.
+
+- **You can no longer vote on your own post or comment.** The server refuses it
+  with 403, and the widget disables — rather than hides — the two buttons for the
+  author, so the author can still read the counts. Judgement uses values the core
+  already ships (`post.data.is_owner`, `comment.is_author`).
+
+- **Locking a thread now takes board-manager permission, not site-admin.** The
+  lock and unlock endpoints used to sit behind the `admin` middleware, so only a
+  site administrator could use them, and the button was shown on
+  `currentUser.is_admin`. Both sides now use
+  `sirsoft-board.{slug}.manager` — the same identifier the core already puts in
+  `post.data.abilities.can_manage` — so pin and lock behave alike inside one
+  widget. Site administrators keep the ability: the admin role is granted every
+  leaf permission, `{slug}.manager` included.
+
+### Fixed
+
+- **The widget is no longer empty on a secret post for people who can read it.**
+  Until now the add-on applied its own rule — "author only" — to secret posts, so
+  a board manager or a holder of `posts.read-secret` could read the post body
+  perfectly well while every add-on endpoint answered 403 and the widget rendered
+  as nothing.
+
+  Both places that judged this (`Support\PostVisibilityGuard` for a single post,
+  `Support\ForumListMetaProvider` for the board-list batch) now delegate to the
+  core's single source of truth, `SecretContentGate::canView()`, keeping the core
+  order: author → verified password → view token → `posts.read-secret` →
+  `manager`. The two paths can no longer disagree with each other or with the
+  core.
+
+  This is also why a secret thread can now be locked and pinned: a manager passes
+  the visibility guard, so no separate branch was needed.
+
+  Note for anyone extending this plugin: these two classes now touch the core
+  `Post` Eloquent model, which the rest of the plugin deliberately avoids. The
+  gate requires a `Post` and resolves the board slug from either the route or a
+  **loaded `board` relation**, failing closed when it can find neither — and the
+  add-on's routes carry no `{slug}`. So the relation is always eager-loaded
+  before the gate is called.
+
+### Removed
+
+- **The widget's placeholder line is gone.** "Forum widgets will appear here
+  (reactions · tags · subscribe · lock)" was a fixed string with no condition on
+  it, left over from the scaffold. Everything in the widget now renders real
+  data.
+
 ## [1.2.0] - 2026-09-20
 
 ### Added

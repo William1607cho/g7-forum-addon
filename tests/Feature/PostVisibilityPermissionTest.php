@@ -127,13 +127,16 @@ class PostVisibilityPermissionTest extends PluginTestCase
     }
 
     // ── 가드를 공유하는 쓰기 라우트 ─────────────────────────────
+    //
+    // 추천 값은 1.3.0 부터 up/down 뿐이다. 값 검사가 가시성 판정보다 먼저이므로,
+    // 여기서 옛 이모지 값을 보내면 403 이 아니라 422 가 되어 의도가 흐려진다.
 
     public function test_post_reaction_on_private_forum_board_is_403_for_member(): void
     {
         $board = $this->createBoard('forum');
         $this->declarePermission($board);
         $postId = $this->createPost($board);
-        $request = $this->requestAs($this->createUserWithRole('user'), [], ['reaction' => 'like']);
+        $request = $this->requestAs($this->createUserWithRole('user'), [], ['reaction' => 'up']);
 
         $status = $this->statusOf(fn () => app(ReactionController::class)->toggle($request, 'posts', $postId));
 
@@ -147,7 +150,7 @@ class PostVisibilityPermissionTest extends PluginTestCase
         $this->declarePermission($board);
         $postId = $this->createPost($board);
         $commentId = $this->createComment($board, $postId);
-        $request = $this->requestAs($this->createUserWithRole('user'), [], ['reaction' => 'like']);
+        $request = $this->requestAs($this->createUserWithRole('user'), [], ['reaction' => 'up']);
 
         $status = $this->statusOf(fn () => app(ReactionController::class)->toggle($request, 'comments', $commentId));
 

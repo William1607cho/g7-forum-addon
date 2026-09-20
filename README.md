@@ -5,7 +5,7 @@
 
 A [Gnuboard7](https://sir.kr/) plugin that adds a **forum-type board** to
 `sirsoft-board` and layers forum features on top of it — pinned posts, best-answer
-acceptance, thread locking, emoji reactions — plus the plumbing (reply targeting,
+acceptance, thread locking, up/down votes — plus the plumbing (reply targeting,
 soft-delete) that `sirsoft-board` already provides.
 
 `sirsoft-board` and the visitor template (`sirsoft-basic`) are **never modified**.
@@ -20,10 +20,10 @@ filter hook, which splices widgets into the final `board/show` layout tree.
 | Feature | What it does |
 |---|---|
 | **Forum board type** | `install()` adds a `forum` row to `board_types` (kept alive across re-seeds by a `seed.sirsoft-board.board_types.translations` filter listener). `uninstall()` removes it, or refuses if a board still uses it. |
-| **Pin (notice)** | Reuses the core `board_posts.is_notice` flag unchanged; the widget shows a "📌 Pinned" badge from `/meta`. |
-| **Thread lock** | A site admin can lock / unlock a forum post. A locked thread rejects new comments and replies **on the server** (two `sirsoft-board.comment.*` filter hooks), and the visitor page replaces the comment form with a "🔒 locked" notice. |
-| **Reactions** | Five emoji reactions (👍 ❤️ 😂 😮 😢) on **posts and comments**. One reaction per user per target — clicking the same one removes it, a different one replaces it (enforced by a DB unique constraint). Logged-in users only. |
-| **Best answer** | The post author (or a site admin) marks one comment — top-level or a reply — as the accepted answer. One per post; re-accepting swaps it. Auto-cleared if the accepted comment is deleted. |
+| **Pin (notice)** *(interactive in 1.3.0)* | A pin **is** the core `board_posts.is_notice` flag — the add-on stores nothing of its own. A board manager pins / unpins from the widget without opening the edit form; the core's "notice on top of page 1" behaviour, SEO cache handling and activity log all follow for free. The widget shows a "📌 Pinned" badge from `/meta`. Replies cannot be pinned (422). |
+| **Thread lock** | A **board manager** can lock / unlock a forum post (site-admin-only until 1.3.0). A locked thread rejects new comments and replies **on the server** (two `sirsoft-board.comment.*` filter hooks), and the visitor page replaces the comment form with a "🔒 locked" notice. |
+| **Up / down votes** *(replaces emoji reactions in 1.3.0)* | Two votes — `up` and `down` — on **posts and comments**, shown as two separate counts. One vote per user per target: clicking the other side switches, clicking the same side cancels (enforced by a DB unique constraint). Logged-in users only, and **not on your own post or comment**. |
+| **Best answer** | The post author (or a site admin — unchanged in 1.3.0) marks one comment — top-level or a reply — as the accepted answer. One per post; re-accepting swaps it. Auto-cleared if the accepted comment is deleted. |
 | **Accepted-answer content box** *(new in 1.1.0)* | The widget shows the accepted answer's full formatted content (bold, lists, block quotes, tables) with the author's avatar, name and timestamp — not just a "there is an accepted answer" line. Renders through the same escape-then-client-sanitize pipeline as ordinary comments, so it inherits `g7-comment-editor`'s existing XSS defense rather than opening a new one. |
 | **Board-list participants + last activity** *(new in 1.1.0)* | The board index page gets a "Participants" column (avatar stack, up to 5 recent commenters) and, on forum boards, relabels "Created" to "Last activity" with the most recent comment/post time. One batched, N+1-free query per page. |
 | **Forum boards are always sorted by last activity** *(new in 1.2.0)* | On `forum` boards the post list is ordered by **last activity, newest first** — server-side, before pagination — so a thread that just got a comment returns to the top of page 1. **This overrides `sort_by` / `sort_order` and the board's own default ordering**; on a forum board, recent activity is the premise of the screen rather than one sort option among several. Other board types are untouched. See [Behaviour to be aware of](#behaviour-to-be-aware-of). |
@@ -43,8 +43,9 @@ post API (since 1.1.1).
 | Method / path | Auth | Notes |
 |---|---|---|
 | `GET  /api/plugins/g7-forum-addon/posts/{id}/meta` | optional | `{ reactions, comment_reactions, tags, subscribed, accepted_reply_id, accepted_reply, is_notice, locked }`. `accepted_reply_id` is self-healed to `null` if the target comment is gone; `accepted_reply` (`{ id, content, author, created_at, created_at_formatted }`, added in 1.1.0) follows it 1:1 and is `null` under the same conditions. |
-| `POST /api/plugins/g7-forum-addon/posts/{id}/lock` · `/unlock` | admin | Site admin only. |
-| `POST /api/plugins/g7-forum-addon/{targetType}/{id}/reactions` | sanctum | `targetType` ∈ `posts` \| `comments`, body `{ reaction }`. One toggle endpoint for add / swap / remove. |
+| `POST /api/plugins/g7-forum-addon/posts/{id}/lock` · `/unlock` | sanctum | Board manager (`sirsoft-board.{slug}.manager`). **Changed in 1.3.0** — was site-admin-only. |
+| `POST /api/plugins/g7-forum-addon/posts/{id}/pin` · `/unpin` *(new in 1.3.0)* | sanctum | Board manager. Idempotent; answers `{ is_notice }` with the resulting state. Calls the core `PostService::updatePost()` with the single key `is_notice`. `422` on a reply. |
+| `POST /api/plugins/g7-forum-addon/{targetType}/{id}/reactions` | sanctum | `targetType` ∈ `posts` \| `comments`, body `{ reaction }` where `reaction` ∈ `up` \| `down` (**changed in 1.3.0**; any other value → `422`). One toggle endpoint for add / switch / remove. `403` on your own post or comment. |
 | `POST /api/plugins/g7-forum-addon/posts/{postId}/comments/{commentId}/accept` · `/unaccept` | sanctum | Post author or site admin. |
 | `GET  /api/plugins/g7-forum-addon/boards/{slug}/list-meta?post_ids=...` *(new in 1.1.0)* | optional | Batched participants + last-activity for a page of board-list rows. 404 on non-forum boards; `401` / `403` without board read permission (1.1.1); re-checks per-post visibility. |
 
@@ -56,10 +57,18 @@ on `board/show` only, transforms the fully-composed layout tree:
 - Splices a forum widget before the post action-button row, and injects a
   `forum_meta` data source that calls `/meta` (a 2-call layout).
 - **Lock:** ANDs a "not locked" condition onto the comment form's `if`, and splices
-  a "🔒 locked" notice in its place; adds a `🔒 Locked` badge and an admin
+  a "🔒 locked" notice in its place; adds a `🔒 Locked` badge and a
   lock / unlock toggle to the widget.
-- **Reactions:** a five-button reaction bar in the widget (for the post) and one
-  spliced right after each rendered comment body `<P>`.
+- **Pin** *(1.3.0)*: a pin / unpin toggle next to the lock toggle.
+- **Manager-only buttons** *(1.3.0)*: the pin and lock toggles are shown on
+  `post.data.abilities.can_manage`, which the core fills from
+  `sirsoft-board.{slug}.manager` — the same identifier the server judges on, so
+  the button and the API cannot disagree. (Until 1.3.0 the lock button used
+  `currentUser.is_admin`.)
+- **Votes:** a two-button up/down bar in the widget (for the post) and one
+  spliced right after each rendered comment body `<P>`. Both counts are always
+  shown, including `0`. For the author the buttons are **disabled rather than
+  hidden**, so the author can still read the counts.
 - **Best answer:** a "✅ Accepted answer" badge + Accept / Unaccept buttons (author
   or admin only) spliced after each comment body, plus a full accepted-answer
   content box (avatar, name, timestamp, formatted body — see Features) in the
@@ -156,6 +165,25 @@ that board first.
 
 ## <a name="behaviour-to-be-aware-of"></a>Behaviour to be aware of
 
+**From 1.3.0, secret posts are judged by the core gate, not by this plugin.**
+Until 1.2.0 the add-on applied its own "author only" rule to secret posts, so a
+board manager or a holder of `posts.read-secret` read the post body normally
+while every add-on endpoint answered `403` — the widget simply rendered as
+nothing for them. Both judging sites (`PostVisibilityGuard`, and the board-list
+batch in `ForumListMetaProvider`) now call `SecretContentGate::canView()`, the
+core's single source of truth, so add-on visibility always matches the body.
+
+Two consequences:
+
+- A secret thread can now be **pinned and locked** by a manager, because the
+  manager passes the visibility guard. There is no separate branch for it.
+- These two classes now use the core `Post` Eloquent model, which the rest of
+  this plugin deliberately avoids. The gate needs a `Post` and resolves the board
+  slug from the route or a **loaded `board` relation**, failing closed with
+  neither — and the add-on routes carry no `{slug}`, so the relation is always
+  eager-loaded before the gate is called. Keep that in mind when extending these
+  paths.
+
 **From 1.2.0, `forum` boards ignore the requested sort order.** Every listing of a
 forum board comes back ordered by last activity (newest first), with ties broken
 by post id descending. This is deliberate — the board-list column already reads
@@ -203,23 +231,35 @@ value without any new column or backfill — the definition lives in one place,
 | Table | Purpose |
 |---|---|
 | `g7_forum_addon_post_meta` | one lazily-created row per forum post — `is_locked`, `accepted_reply_id` |
-| `g7_forum_addon_reactions` | post / comment reactions, unique on `(target_type, target_id, user_id)` |
+| `g7_forum_addon_reactions` | post / comment votes (`up` / `down` since 1.3.0), unique on `(target_type, target_id, user_id)` |
 
 (With `DB_PREFIX` set, the physical table names carry the prefix twice, as with
 other Gnuboard7 plugins.)
 
 ## <a name="사용법-한국어"></a>사용법 (한국어)
 
-`sirsoft-board` 에 **포럼형(`forum`) 게시판 유형**을 추가하고, 그 위에 고정 · 잠금 ·
-리액션 · 베스트답글을 얹는 애드온입니다. **`sirsoft-board` 와 템플릿(`sirsoft-basic`) 은
+`sirsoft-board` 에 **포럼형(`forum`) 게시판 유형**을 추가하고, 그 위에 고정(핀) · 잠금 ·
+추천 · 베스트답글을 얹는 애드온입니다. **`sirsoft-board` 와 템플릿(`sirsoft-basic`) 은
 전혀 수정하지 않으며**, 애드온 전용 테이블 · 자체 API · `core.layout_extension.after_apply`
 필터 훅으로만 동작합니다.
 
-- **잠금**: 사이트 관리자가 포럼 게시글을 잠그면 새 댓글·답글이 **서버에서** 거부되고,
-  방문자 화면에서는 댓글 폼이 "🔒 잠긴 게시글" 안내로 바뀝니다.
-- **리액션**: 게시글·댓글에 5종 이모지(👍 ❤️ 😂 😮 😢). 사용자당 대상 1개(재클릭=취소,
-  다른 종류=교체, DB 유니크 제약). 로그인 사용자만.
-- **베스트답글**: 글 작성자(또는 사이트 관리자)가 댓글 하나를 "채택된 답변"으로 지정.
+- **고정(핀)** *(1.3.0 부터 화면에서 조작)*: 게시판 관리자가 글 수정 화면을 거치지 않고
+  위젯의 버튼으로 글을 고정·해제합니다. **고정은 곧 코어의 공지 값**입니다 — 애드온은
+  따로 저장하지 않고 `board_posts.is_notice` 를 바꾸기만 하므로, "공지는 1페이지 맨 위"
+  라는 코어 동작과 SEO 캐시 처리·활동 로그가 그대로 따라옵니다. 답글은 고정할 수
+  없습니다(422). 고정·해제는 `updated_at` 을 바꾸지만 목록의 최근활동순 정렬에는 영향이
+  없습니다(정렬은 `created_at` 만 봅니다).
+- **잠금**: **게시판 관리자**가 포럼 게시글을 잠그면 새 댓글·답글이 **서버에서** 거부되고,
+  방문자 화면에서는 댓글 폼이 "🔒 잠긴 게시글" 안내로 바뀝니다. *1.3.0 변경* — 그 전에는
+  사이트 관리자만 가능했습니다. 핀과 잠금이 한 위젯 안에서 기준이 갈리지 않도록 맞췄고,
+  화면 버튼도 서버와 같은 식별자(`sirsoft-board.{slug}.manager`)로 노출됩니다. 관리자
+  역할은 리프 권한을 모두 갖고 있으므로 기존 사이트 관리자는 그대로 잠글 수 있습니다.
+- **추천(업·다운)** *(1.3.0 — 5종 이모지를 대체)*: 게시글·댓글에 `up` / `down` 두 가지.
+  사용자당 대상 1표(같은 쪽 재클릭=취소, 반대쪽=전환, DB 유니크 제약). 업·다운 개수를
+  각각 숫자로 표시하며 0 도 숨기지 않습니다(순점수는 만들지 않습니다). 로그인 사용자만이고,
+  **자기 글·자기 댓글에는 투표할 수 없습니다**(서버 403, 화면은 버튼 비활성 — 감추면
+  작성자만 자기 글의 점수를 못 보게 되므로). 스키마 변경도 마이그레이션도 없습니다.
+- **베스트답글**: 글 작성자(또는 사이트 관리자 — 1.3.0 에서 바뀌지 않음)가 댓글 하나를 "채택된 답변"으로 지정.
   답글(대댓글)도 가능, 게시글당 1개, 채택 댓글 삭제 시 자동 해제.
 - **채택된 답변 전문 표시** *(1.1.0 신규)*: 위젯에 채택된 답변의 서식 포함 전문(굵게·목록·
   인용구·표)을 작성자 아바타·이름·시각과 함께 표시. 기존 댓글과 동일한 이스케이프 후
