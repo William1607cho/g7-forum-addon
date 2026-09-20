@@ -5,6 +5,7 @@ use Plugins\G7\Forum\Addon\Http\Controllers\AcceptedReplyController;
 use Plugins\G7\Forum\Addon\Http\Controllers\ForumListMetaController;
 use Plugins\G7\Forum\Addon\Http\Controllers\PostLockController;
 use Plugins\G7\Forum\Addon\Http\Controllers\PostMetaController;
+use Plugins\G7\Forum\Addon\Http\Controllers\PostPinController;
 use Plugins\G7\Forum\Addon\Http\Controllers\ReactionController;
 
 /*
@@ -22,19 +23,37 @@ Route::get('posts/{id}/meta', [PostMetaController::class, 'show'])
     ->name('posts.meta');
 
 // 게시글 잠금(Lock) 토글 — 잠긴 포럼 게시글은 애드온이 새 댓글 작성을 서버에서 거부한다.
-// 인가는 컨트롤러 베이스(AdminBaseController: auth:sanctum + admin)가 전담한다 →
-// 사이트 관리자만. 컨트롤러가 /meta 와 동일한 가시성 규칙 + 포럼유형을 재검증한다.
+// `auth:sanctum` 이 비회원을 401 로 막고, 컨트롤러가 게시판 매니저
+// (`sirsoft-board.{slug}.manager`)인지 판정해 아니면 403 이다(1.3.0 — 그 전에는
+// AdminBaseController 로 사이트 관리자 전용이었다). 컨트롤러가 /meta 와 동일한
+// 가시성 규칙 + 포럼유형도 재검증한다.
 Route::post('posts/{id}/lock', [PostLockController::class, 'lock'])
     ->whereNumber('id')
+    ->middleware(['auth:sanctum', 'throttle:120,1'])
     ->name('posts.lock');
 
 Route::post('posts/{id}/unlock', [PostLockController::class, 'unlock'])
     ->whereNumber('id')
+    ->middleware(['auth:sanctum', 'throttle:120,1'])
     ->name('posts.unlock');
 
-// 리액션(추천/좋아요) 토글 — 게시글·댓글 양쪽. 1인 1리액션(같은 종류 재클릭=취소,
-// 다른 종류=교체). `auth:sanctum` → 로그인 사용자만(비회원 401). 컨트롤러가 /meta 와
-// 동일한 가시성 + 포럼유형을 재검증한다. 잠금 상태와 무관하게 동작.
+// 게시글 핀(고정) 토글 — 값의 원천은 코어 `board_posts.is_notice` 다(애드온 미저장).
+// 권한은 잠금과 같은 기준(게시판 매니저). 컨트롤러가 판정을 통과한 요청만 코어
+// PostService::updatePost() 에 `is_notice` 키 하나로 넘긴다. 멱등이다.
+Route::post('posts/{id}/pin', [PostPinController::class, 'pin'])
+    ->whereNumber('id')
+    ->middleware(['auth:sanctum', 'throttle:120,1'])
+    ->name('posts.pin');
+
+Route::post('posts/{id}/unpin', [PostPinController::class, 'unpin'])
+    ->whereNumber('id')
+    ->middleware(['auth:sanctum', 'throttle:120,1'])
+    ->name('posts.unpin');
+
+// 추천(업·다운) 토글 — 게시글·댓글 양쪽. 1인 1표(같은 쪽 재클릭=취소, 반대쪽=전환).
+// `auth:sanctum` → 로그인 사용자만(비회원 401). 컨트롤러가 /meta 와 동일한 가시성 +
+// 포럼유형을 재검증하고, 본인 글·본인 댓글 투표는 403 으로 거부한다(1.3.0).
+// 잠금 상태와 무관하게 동작.
 Route::post('{targetType}/{id}/reactions', [ReactionController::class, 'toggle'])
     ->whereIn('targetType', ['posts', 'comments'])
     ->whereNumber('id')

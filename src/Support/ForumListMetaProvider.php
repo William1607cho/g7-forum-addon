@@ -4,7 +4,10 @@ namespace Plugins\G7\Forum\Addon\Support;
 
 use App\Enums\UserStatus;
 use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Modules\Sirsoft\Board\Models\Post;
+use Modules\Sirsoft\Board\Support\SecretContentGate;
 use Modules\Sirsoft\Board\Traits\FormatsBoardDate;
 
 /**
@@ -68,18 +71,30 @@ class ForumListMetaProvider
     /**
      * 요청된 게시글 ID 중 이 요청자에게 노출 가능한 것만 남깁니다.
      *
-     * `PostVisibilityGuard::assertViewable()` 와 같은 판정 기준(비밀글/블라인드/삭제 →
-     * 작성자 본인만)을 배치용으로 적용한다 — 단일 게시글처럼 404 로 중단하지 않고,
-     * 통과하지 못한 ID 만 조용히 제외한다(나머지는 정상 응답해야 하는 배치 특성).
+     * `PostVisibilityGuard::assertViewable()` 와 같은 판정 기준을 배치용으로 적용한다 —
+     * 단일 게시글처럼 404 로 중단하지 않고, 통과하지 못한 ID 만 조용히 제외한다
+     * (나머지는 정상 응답해야 하는 배치 특성).
+     *
+     * 비밀글 판정은 1.3.0 부터 코어 `SecretContentGate::canView()`(SSoT)에 위임한다 —
+     * 단일 경로(`PostVisibilityGuard`)와 같은 게이트를 쓰므로, 목록에서는 빠지는데
+     * 상세에서는 보이는(또는 그 반대) 드리프트가 생기지 않는다. 게이트는 슬러그를
+     * `route('slug')` 또는 로드된 `board` 관계에서만 해석하므로 **`board` 관계를 함께
+     * 로드**해 넘긴다(이 엔드포인트는 라우트에 `{slug}` 가 있지만, 그 사실에 기대지
+     * 않고 명시적으로 로드한다).
+     *
+     * 비밀글이 아닌 글은 게이트를 태우지 않는다. 비밀글만 한 번에 모아 모델로 올리므로
+     * 쿼리는 최대 2개(+`board` eager load 1개) 늘어난다.
      *
      * @param  array<int, int>  $postIds
      * @return array<int, int>
      */
-    public function filterVisiblePostIds(int $boardId, array $postIds, ?int $viewerId): array
+    public function filterVisiblePostIds(Request $request, int $boardId, array $postIds): array
     {
         if ($postIds === []) {
             return [];
         }
+
+        $viewerId = $request->user()?->id;
 
         $rows = DB::table('board_posts')
             ->select('id', 'user_id', 'is_secret', 'status', 'deleted_at')
@@ -87,7 +102,9 @@ class ForumListMetaProvider
             ->whereIn('id', $postIds)
             ->get();
 
-        $allowed = [];
+        $secretIds = [];
+        $candidates = [];
+
         foreach ($rows as $row) {
             $isAuthor = $viewerId !== null && (int) $row->user_id === (int) $viewerId;
             $isRemoved = $row->deleted_at !== null || $row->status === 'deleted';
@@ -96,11 +113,55 @@ class ForumListMetaProvider
             if (($isRemoved || $isBlinded) && ! $isAuthor) {
                 continue;
             }
-            if ((int) $row->is_secret === 1 && ! $isAuthor) {
+
+            if ((int) $row->is_secret === 1) {
+                $secretIds[] = (int) $row->id;
+            }
+
+            $candidates[] = (int) $row->id;
+        }
+
+        $secretAllowed = $this->filterViewableSecretIds($request, $secretIds);
+
+        $allowed = [];
+        foreach ($candidates as $id) {
+            if (in_array($id, $secretIds, true) && ! in_array($id, $secretAllowed, true)) {
                 continue;
             }
 
-            $allowed[] = (int) $row->id;
+            $allowed[] = $id;
+        }
+
+        return $allowed;
+    }
+
+    /**
+     * 비밀글 ID 묶음 중 요청자가 원문을 열람할 수 있는 것만 남깁니다.
+     *
+     * 판정은 코어 `SecretContentGate`(SSoT) 가 한다 — 작성자 → 비밀번호 검증 →
+     * 열람 확인 토큰 → `posts.read-secret` → `manager` 순서도 코어 그대로다.
+     * 모델을 찾지 못하면 fail-closed 로 제외한다.
+     *
+     * @param  array<int, int>  $secretIds
+     * @return array<int, int>
+     */
+    private function filterViewableSecretIds(Request $request, array $secretIds): array
+    {
+        if ($secretIds === []) {
+            return [];
+        }
+
+        $gate = app(SecretContentGate::class);
+        $allowed = [];
+
+        foreach (Post::with('board')->whereIn('id', $secretIds)->get() as $post) {
+            if ($post->board === null) {
+                continue;
+            }
+
+            if ($gate->canView($post, $request)) {
+                $allowed[] = (int) $post->id;
+            }
         }
 
         return $allowed;

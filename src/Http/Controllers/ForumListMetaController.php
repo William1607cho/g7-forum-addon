@@ -5,7 +5,6 @@ namespace Plugins\G7\Forum\Addon\Http\Controllers;
 use App\Http\Controllers\Api\Base\PublicBaseController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Plugins\G7\Forum\Addon\Support\ForumListMetaProvider;
 use Plugins\G7\Forum\Addon\Support\PostVisibilityGuard;
@@ -24,7 +23,8 @@ use Plugins\G7\Forum\Addon\Support\PostVisibilityGuard;
  * (`PostVisibilityGuard::assertBoardReadable()`, 1.1.1). 게시글별
  * 가시성(비밀글/블라인드/삭제)은 `ForumListMetaProvider::filterVisiblePostIds()` 로
  * 배치용으로 재검증한다 — 단일 게시글 엔드포인트(`/meta`)처럼 통째로 중단하지 않고
- * 통과 못한 ID 만 결과에서 조용히 빠진다.
+ * 통과 못한 ID 만 결과에서 조용히 빠진다. 비밀글 판정은 1.3.0 부터 코어
+ * `SecretContentGate`(SSoT)에 위임하므로 `/meta` 와 판정이 항상 같다.
  */
 class ForumListMetaController extends PublicBaseController
 {
@@ -55,8 +55,7 @@ class ForumListMetaController extends PublicBaseController
             return $this->success('common.success', (object) []);
         }
 
-        $viewerId = Auth::id();
-        $visibleIds = $this->provider->filterVisiblePostIds((int) $board->id, $requestedIds, $viewerId);
+        $visibleIds = $this->provider->filterVisiblePostIds($request, (int) $board->id, $requestedIds);
 
         if ($visibleIds === []) {
             return $this->success('common.success', (object) []);

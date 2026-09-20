@@ -5,6 +5,168 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-20
+
+### Added
+
+- **Pin a post from the widget (`pin` / `unpin`).** A board manager can now pin a
+  forum post straight from the post widget, without opening the edit form.
+
+  A pin **is** the core notice flag. The add-on stores nothing of its own: the
+  new `POST posts/{id}/pin` and `POST posts/{id}/unpin` endpoints judge the
+  permission and then call `sirsoft-board`'s `PostService::updatePost()` with a
+  **single key, `is_notice`**. Everything the core already does for a notice —
+  top of page 1 of the list, SEO cache invalidation and regeneration, the
+  activity log entry — follows for free, and there is no second source of truth
+  to drift from the list ordering.
+
+  `is_secret`, `content`, `title` and `status` are protected by **not putting
+  their keys in the array**, not by writing their old values back: the core
+  repository passes the array straight to `$post->update()`, so a column that is
+  not in the array is not in the UPDATE statement. (Because `content` is absent,
+  the model's `saving` hook also skips recomputing the body thumbnail.)
+
+  Both endpoints are idempotent and answer with the resulting state
+  (`data.is_notice`). Replies (`parent_id` set) are refused with 422 — the core
+  notice query requires `parent_id IS NULL`, so pinning a reply would store a
+  value that never shows up anywhere.
+
+  `updated_at` does change. Forum list ordering is unaffected: `ActivityTime`
+  only ever looks at `created_at`.
+
+### Changed
+
+- **Emoji reactions are now up/down votes.** The five emoji reactions
+  (like / love / haha / wow / sad) are replaced by exactly two, `up` and `down`.
+  Sending any other value — including an old emoji name — is refused with 422.
+
+  One vote per person per target is unchanged and still enforced by the same
+  unique constraint: clicking the other side switches the vote, clicking the same
+  side again cancels it. The widget shows the up and down counts as two separate
+  numbers, always visible (including `0`); there is no net score.
+
+  **No schema change and no migration.** `reaction` is a free-form string column
+  and the allowed values live only in `ReactionStore::REACTIONS`. Both sites held
+  zero reaction rows at the time of the change, so there was nothing to convert.
+  A site that upgrades with existing emoji rows would keep those rows, but they
+  would no longer be counted or displayed.
+
+- **You can no longer vote on your own post or comment.** The server refuses it
+  with 403, and the widget disables — rather than hides — the two buttons for the
+  author, so the author can still read the counts. Judgement uses values the core
+  already ships (`post.data.is_owner`, `comment.is_author`).
+
+- **Locking a thread now takes board-manager permission, not site-admin.** The
+  lock and unlock endpoints used to sit behind the `admin` middleware, so only a
+  site administrator could use them, and the button was shown on
+  `currentUser.is_admin`. Both sides now use
+  `sirsoft-board.{slug}.manager` — the same identifier the core already puts in
+  `post.data.abilities.can_manage` — so pin and lock behave alike inside one
+  widget. Site administrators keep the ability: the admin role is granted every
+  leaf permission, `{slug}.manager` included.
+
+- **The widget is no longer a dashed blue box, and its controls are one row of
+  equal squares.** The dashed border and blue tint are gone (the spacing stays),
+  and everything the widget offers now sits on a single row: the up/down votes on
+  the left, the status badges beside them, and the pin and lock toggles pinned to
+  the right edge. The accepted-answer content box moved below that row.
+
+  All four buttons are the same 40px square (`w-10 h-10`). The votes stack a
+  direction icon over their count; pin and lock show only an icon and carry their
+  name in `title` and `aria-label`. A toggle that is **on** is filled rather than
+  outlined — `lock-open` is not in the template's icon subset, so state cannot be
+  shown by shape — and reports it through `aria-pressed`. The author's own vote
+  buttons stay disabled rather than hidden, as before.
+
+  The row does not wrap: only the badge group between the votes and the toggles
+  is allowed to wrap or shrink, so the four buttons stay on one line at phone
+  width.
+
+  **Icon substitutions.** The template ships a Solid-only Font Awesome subset and
+  an unknown name renders as a blank glyph with no error, so only names present
+  in that subset are used: `chevron-up` / `chevron-down` for the votes (the
+  subset has no `caret-*`) and `bullhorn` for the pin (no `thumbtack`; the pin
+  drives the core notice flag, so a megaphone is not a stretch). Lock keeps
+  `lock`. The template itself is untouched.
+
+- **The accepted answer now stands out as a whole comment.** Previously only a
+  small badge under the comment body said so. The accepted comment's own row now
+  gets a green border and tint that reads in both light and dark mode, and the
+  badge itself became an explicit "Accepted" mark with a check icon, shown to
+  everyone rather than only to those who can change it.
+
+  The highlight is applied the same way as every other change this plugin makes
+  to the page — by rewriting the `className` of the comment row container in the
+  layout tree that `core.layout_extension.after_apply` hands over. No template
+  file is modified, and the container's own `style` (the depth indent) is left
+  alone. Rows that are not accepted get a transparent border of the same width so
+  nothing shifts when the highlight appears.
+
+- **Every button in the widget and under each comment now explains itself on
+  hover.** The buttons are icon-only, so the name had to come from somewhere; the
+  browser's own `title` tooltip waits about a second before appearing, which is a
+  second of not knowing what four identical squares do. A small tooltip is drawn
+  instead and appears immediately. `title` is deliberately *not* set as well —
+  both would show. `aria-label` still carries the name for assistive tech, and
+  the tooltip itself is `aria-hidden` and `pointer-events-none`.
+
+  The disabled vote buttons get a tooltip too, saying why they are disabled
+  rather than leaving the reader to guess — a disabled button still receives
+  `:hover`.
+
+- **The comment's "Accept" button is now a square next to the votes.** It was a
+  text button on its own row; it is now the same 40px square as everything else,
+  sitting beside the up/down buttons, with `circle-check` for an icon. An
+  accepted answer's toggle is filled green and reports `aria-pressed`. The row
+  that used to hold it now carries only the "Accepted" mark.
+
+  **Who may accept, and what accepting does, are unchanged** — same condition,
+  same endpoint, same permission. This moves a button; it does not touch the API.
+
+- **Vote buttons are disabled for anyone who cannot vote, not just for the
+  author.** A signed-out visitor saw two live-looking buttons that answered
+  "authentication required" on click. They are now greyed out the same way the
+  author's own buttons are — counts still readable — and the tooltip says to sign
+  in. The author's message wins when both apply.
+
+  The signed-in check is also folded into the "your own" test. The core's
+  `is_author` is `Auth::id() === user_id`, which is `null === null`, i.e. **true**,
+  for a signed-out visitor looking at a guest comment; without the extra check
+  such a visitor was told it was their own comment. The server never applies the
+  own-target rule to a target with no owner, so this now matches it.
+
+### Fixed
+
+- **The widget is no longer empty on a secret post for people who can read it.**
+  Until now the add-on applied its own rule — "author only" — to secret posts, so
+  a board manager or a holder of `posts.read-secret` could read the post body
+  perfectly well while every add-on endpoint answered 403 and the widget rendered
+  as nothing.
+
+  Both places that judged this (`Support\PostVisibilityGuard` for a single post,
+  `Support\ForumListMetaProvider` for the board-list batch) now delegate to the
+  core's single source of truth, `SecretContentGate::canView()`, keeping the core
+  order: author → verified password → view token → `posts.read-secret` →
+  `manager`. The two paths can no longer disagree with each other or with the
+  core.
+
+  This is also why a secret thread can now be locked and pinned: a manager passes
+  the visibility guard, so no separate branch was needed.
+
+  Note for anyone extending this plugin: these two classes now touch the core
+  `Post` Eloquent model, which the rest of the plugin deliberately avoids. The
+  gate requires a `Post` and resolves the board slug from either the route or a
+  **loaded `board` relation**, failing closed when it can find neither — and the
+  add-on's routes carry no `{slug}`. So the relation is always eager-loaded
+  before the gate is called.
+
+### Removed
+
+- **The widget's placeholder line is gone.** "Forum widgets will appear here
+  (reactions · tags · subscribe · lock)" was a fixed string with no condition on
+  it, left over from the scaffold. Everything in the widget now renders real
+  data.
+
 ## [1.2.0] - 2026-09-20
 
 ### Added

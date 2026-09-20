@@ -7,6 +7,8 @@ use App\Helpers\ResponseHelper;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Modules\Sirsoft\Board\Models\Post;
+use Modules\Sirsoft\Board\Support\SecretContentGate;
 
 /**
  * 애드온 엔드포인트가 게시글 메타를 내려주기 전, sirsoft-board 와 **동일한 가시성 규칙**을
@@ -23,10 +25,20 @@ use Illuminate\Support\Facades\DB;
  *                                  permission 미들웨어와 같은 판정·같은 순서·같은 응답
  *                                  (비회원 401 / 권한 없는 회원 403). 1.1.1 에서 추가.
  *  - status = blinded / deleted  : 작성자 본인만 통과 (매니저 권한 경로는 TODO)
- *  - is_secret                   : 작성자 본인만 통과 (로그인+게시판권한/비번검증 토큰 경로는 TODO)
+ *  - is_secret                   : **코어 `SecretContentGate::canView()` 에 위임** (1.3.0)
  *
- * TODO 표시 지점은 각 포럼 기능이 실제 데이터를 붙이기 전에 sirsoft-board 의 PostResource/
- * CommentResource 가 쓰는 `canViewSecretForPost` 등가 로직으로 채운다.
+ * ── 비밀글 판정을 코어에 위임한 이유 (1.3.0) ──────────────────────────
+ * 1.2.0 까지는 "작성자 본인만" 이라는 자체 규칙이었다. 그래서 게시판 매니저나
+ * `posts.read-secret` 보유자가 본문은 정상적으로 읽는데 애드온 API 만 403 을 돌려주어,
+ * 그 사람들에게는 위젯이 통째로 비어 보였다. 코어는 같은 판정을 `SecretContentGate`
+ * 한 곳(SSoT)에 모아 두었으므로 규칙을 복제하지 않고 그대로 쓴다 — 작성자 →
+ * 비밀번호 검증 → 열람 토큰 → `posts.read-secret` → `manager` 순서도 코어 그대로다.
+ *
+ * ⚠ 이 클래스는 이 플러그인에서 예외적으로 코어 Eloquent 모델(`Post`)을 쓴다.
+ * 게이트가 `Post` 타입을 요구하고, 슬러그를 `route('slug')` 또는 **로드된 `board`
+ * 관계**에서만 해석하며 못 얻으면 fail-closed(마스킹)로 떨어지기 때문이다. 애드온
+ * 라우트에는 `{slug}` 파라미터가 없으므로 `board` 관계를 반드시 함께 로드해 넘긴다.
+ * 나머지 조회는 종전대로 쿼리 빌더를 쓴다.
  */
 class PostVisibilityGuard
 {
@@ -61,12 +73,33 @@ class PostVisibilityGuard
             abort(403, 'This post is not viewable.');
         }
 
-        // 비밀글 → 작성자 본인만 (로그인+게시판권한 / 비번검증 토큰 경로 TODO)
-        if ((int) $post->is_secret === 1 && ! $isAuthor) {
+        // 비밀글 → 코어 게이트(SSoT)에 위임. 작성자 판정도 게이트 안에서 먼저 이뤄진다.
+        if ((int) $post->is_secret === 1 && ! $this->canViewSecret((int) $post->id, $request)) {
             abort(403, 'This post is secret.');
         }
 
         return (object) ['post' => $post, 'board' => $board];
+    }
+
+    /**
+     * 비밀글 원문 열람 권한을 코어 `SecretContentGate` 로 판정한다.
+     *
+     * 게이트는 `Post` 모델과 슬러그를 필요로 하고, 슬러그를 해석하지 못하면 안전하게
+     * false 를 돌려준다. 애드온 라우트에는 `{slug}` 가 없으므로 `board` 관계를 함께
+     * 로드해 넘긴다. 모델을 찾지 못하면(경합 등) fail-closed 로 거부한다.
+     *
+     * @param  int  $postId  board_posts.id
+     * @param  Request  $request  HTTP 요청 (열람 확인 토큰 헤더를 여기서 읽는다)
+     */
+    public function canViewSecret(int $postId, Request $request): bool
+    {
+        $model = Post::with('board')->find($postId);
+
+        if ($model === null || $model->board === null) {
+            return false;
+        }
+
+        return app(SecretContentGate::class)->canView($model, $request);
     }
 
     /**
@@ -98,9 +131,9 @@ class PostVisibilityGuard
     }
 
     /**
-     * 댓글을 리액션 대상으로 삼기 전, 댓글 존재/상태 + 소속 게시글 가시성을 재검증한다.
+     * 댓글을 추천 대상으로 삼기 전, 댓글 존재/상태 + 소속 게시글 가시성을 재검증한다.
      *
-     * 삭제(soft delete)·삭제 상태·블라인드 댓글에는 리액션할 수 없다. 통과 조건이면
+     * 삭제(soft delete)·삭제 상태·블라인드 댓글에는 추천할 수 없다. 통과 조건이면
      * 댓글이 속한 게시글에 대해 `assertViewable()` 을 그대로 태워 게시글 가시성까지 확인한다.
      *
      * @return object{comment: object, post: object, board: object} 통과 시 행들

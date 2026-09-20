@@ -5,12 +5,16 @@ namespace Plugins\G7\Forum\Addon\Support;
 use Illuminate\Support\Facades\DB;
 
 /**
- * 리액션(추천/좋아요) 저장·집계의 단일 지점.
+ * 추천(업·다운) 저장·집계의 단일 지점.
  *
  * - 대상: `post`(board_posts) / `comment`(board_comments)
- * - 종류: 5종 이모지 — like / love / haha / wow / sad
- * - **1인 1리액션**: 한 사용자는 한 대상에 리액션 1개. 같은 종류 재클릭 = 취소,
- *   다른 종류 클릭 = 교체. (`(target_type,target_id,user_id)` 유니크 제약과 짝)
+ * - 종류: **2종 — up / down** (1.3.0 에서 5종 이모지 like/love/haha/wow/sad 를 대체했다)
+ * - **1인 1표**: 한 사용자는 한 대상에 표 1개. 같은 쪽 재클릭 = 취소,
+ *   다른 쪽 클릭 = 전환. (`(target_type,target_id,user_id)` 유니크 제약과 짝)
+ *
+ * 저장 구조는 그대로다 — `reaction` 은 자유 문자열 컬럼이고 허용 값은 아래 상수뿐이므로
+ * 종류 교체에 스키마 변경도 마이그레이션도 필요하지 않다. 전환 시점에 양 사이트의
+ * 기존 행이 0 건이라 변환 대상도 없었다(1.3.0 조사).
  *
  * 모델 없이 쿼리 빌더로 처리(post_meta·lock 과 동일 방침). 테이블명은 코드 기준
  * `g7_forum_addon_reactions`, 커넥션 prefix 가 물리명 `g7_g7_forum_addon_reactions` 로 해석.
@@ -19,8 +23,8 @@ class ReactionStore
 {
     public const TABLE = 'g7_forum_addon_reactions';
 
-    /** 허용 리액션 종류 (순서 = 프론트 표시 순서) */
-    public const REACTIONS = ['like', 'love', 'haha', 'wow', 'sad'];
+    /** 허용 추천 종류 (순서 = 프론트 표시 순서) */
+    public const REACTIONS = ['up', 'down'];
 
     /** 허용 대상 유형 */
     public const TARGETS = ['post', 'comment'];
@@ -48,7 +52,7 @@ class ReactionStore
     }
 
     /**
-     * 리액션 토글/교체/취소.
+     * 추천 토글/전환/취소.
      *
      * @return array{action: 'added'|'changed'|'removed', reaction: string|null}
      */
@@ -90,7 +94,10 @@ class ReactionStore
     }
 
     /**
-     * 한 대상의 리액션 요약.
+     * 한 대상의 추천 요약.
+     *
+     * `counts` 는 `{up: n, down: n}`, `total` 은 둘의 합(투표 참여 수)이다.
+     * 순점수(up - down)는 화면이 두 숫자를 각각 표시하므로 내려주지 않는다.
      *
      * @return array{counts: array<string,int>, total: int, mine: string|null}
      */
@@ -125,7 +132,7 @@ class ReactionStore
     }
 
     /**
-     * 여러 댓글의 리액션 요약을 한 번에.
+     * 여러 댓글의 추천 요약을 한 번에.
      *
      * @param  array<int>  $commentIds
      * @return array<int, array{counts: array<string,int>, total: int, mine: string|null}>
