@@ -25,12 +25,12 @@ filter hook, which splices widgets into the final `board/show` layout tree.
 | **Reactions** | Five emoji reactions (👍 ❤️ 😂 😮 😢) on **posts and comments**. One reaction per user per target — clicking the same one removes it, a different one replaces it (enforced by a DB unique constraint). Logged-in users only. |
 | **Best answer** | The post author (or a site admin) marks one comment — top-level or a reply — as the accepted answer. One per post; re-accepting swaps it. Auto-cleared if the accepted comment is deleted. |
 | **Accepted-answer content box** *(new in 1.1.0)* | The widget shows the accepted answer's full formatted content (bold, lists, block quotes, tables) with the author's avatar, name and timestamp — not just a "there is an accepted answer" line. Renders through the same escape-then-client-sanitize pipeline as ordinary comments, so it inherits `g7-comment-editor`'s existing XSS defense rather than opening a new one. |
-| **Board-list participants + last activity** *(new in 1.1.0)* | The board index page gets a "Participants" column (avatar stack, up to 5 recent commenters) and, on forum boards, relabels "Created" to "Last activity" with the most recent comment/post time. One batched, N+1-free query per page. Display only — see Known issues for sort order. |
+| **Board-list participants + last activity** *(new in 1.1.0)* | The board index page gets a "Participants" column (avatar stack, up to 5 recent commenters) and, on forum boards, relabels "Created" to "Last activity" with the most recent comment/post time. One batched, N+1-free query per page. |
+| **Forum boards are always sorted by last activity** *(new in 1.2.0)* | On `forum` boards the post list is ordered by **last activity, newest first** — server-side, before pagination — so a thread that just got a comment returns to the top of page 1. **This overrides `sort_by` / `sort_order` and the board's own default ordering**; on a forum board, recent activity is the premise of the screen rather than one sort option among several. Other board types are untouched. See [Behaviour to be aware of](#behaviour-to-be-aware-of). |
 | **Replies default-expanded on forum boards** *(new in 1.1.0)* | A comment's reply thread starts expanded on forum boards (still collapsed by default everywhere else); the "N replies" toggle keeps working normally in both directions. |
 | **Reply targeting / soft-delete** | Provided by `sirsoft-board` itself; the forum board type inherits them, no code. |
 
-Not yet implemented: edit history, tags, mentions + notifications, subscriptions,
-sorting the board list by last activity (see Known issues).
+Not yet implemented: edit history, tags, mentions + notifications, subscriptions.
 
 ## API
 
@@ -154,16 +154,47 @@ that board first.
 > or activate in the wrong order), but you must remove in the right order yourself:
 > **`g7-forum-addon` first, then `g7-comment-editor`.**
 
+## <a name="behaviour-to-be-aware-of"></a>Behaviour to be aware of
+
+**From 1.2.0, `forum` boards ignore the requested sort order.** Every listing of a
+forum board comes back ordered by last activity (newest first), with ties broken
+by post id descending. This is deliberate — the board-list column already reads
+"Last activity", and a list that shows one thing while ordering by another is
+worse than no column at all.
+
+What that means in practice:
+
+- `?sort_by=` / `?sort_order=` on a forum board are ignored, as is the board's
+  **Default sort** admin setting. Both keep working normally on every other
+  board type.
+- **Pinned (notice) posts are unaffected.** `sirsoft-board` fetches them in a
+  separate query and puts them at the top of page 1; this plugin does not touch
+  that path.
+- **The admin post list for a forum board is sorted the same way**, because it
+  goes through the same repository method. Sorting by title or author in the
+  admin screen therefore has no effect on forum boards.
+- **Anything else calling the core list API for a forum board sees this order
+  too** — server-side rendering for crawlers, and any integration that reads
+  `GET /api/modules/sirsoft-board/boards/{slug}/posts`.
+
+"Activity" means the post's own creation time, or the creation time of its most
+recent **non-deleted** comment, whichever is later. Editing a post or a comment
+is not activity, and neither is a reaction or accepting an answer. Deleting a
+comment removes it from the calculation immediately. Every post therefore has a
+value without any new column or backfill — the definition lives in one place,
+`src/Support/ActivityTime.php`, shared by the sort and the displayed column.
+
 ## Known issues
 
 - **Accepted-answer box colors are fixed.** The green palette in
   `BoardShowWidgetListener::acceptedReplyBox()` is hard-coded; there is no
   settings UI to change it yet.
-- **Board-list "last activity" does not change sort order.** The column shows
-  the right timestamp, but the list is still paginated/sorted by whatever
-  `sirsoft-board` already does — it exposes no hook this plugin can use to
-  change list ordering, so a forum board is not actually sorted by recent
-  activity.
+- **Last-activity sorting does not scale to very large forum boards.** The sort
+  key is a correlated subquery over `board_comments`, evaluated for every root
+  post of the board before the page is cut. It is backed by
+  `idx_board_comments_post_deleted_created` and is inexpensive for boards of a
+  few thousand posts, but a materialised column would be needed beyond that —
+  and that cannot be done without modifying `sirsoft-board`.
 - **Plugin → plugin removal order isn't enforced by the core** — see the
   callout above.
 
@@ -195,8 +226,20 @@ other Gnuboard7 plugins.)
   클라이언트 재정화 방식이라 별도의 XSS 방어 경로를 새로 열지 않습니다. 색상은 현재
   고정값(설정 UI 없음).
 - **게시판 목록 참여자 · 최근 활동** *(1.1.0 신규)*: 게시판 목록에 "참여자" 컬럼(최근
-  댓글 작성자 아바타, 최대 5명), 포럼 게시판은 "작성일"이 "최근 활동"으로 표시(정렬
-  기준은 변경되지 않음 — 표시만).
+  댓글 작성자 아바타, 최대 5명), 포럼 게시판은 "작성일"이 "최근 활동"으로 표시.
+- **포럼 게시판 목록은 항상 최근활동순** *(1.2.0 신규)*: 포럼 유형 게시판의 목록은
+  페이지를 나누기 전에 서버에서 최근 활동순(내림차순)으로 정렬됩니다. 방금 댓글이 달린
+  글이 1페이지 맨 위로 올라옵니다. **요청의 `sort_by`/`sort_order` 와 게시판의 "기본 정렬"
+  설정을 무시합니다** — 포럼에서 "최근 활동"은 고를 수 있는 정렬이 아니라 화면의 전제이고,
+  목록에 보이는 값과 순서가 어긋나면 안 되기 때문입니다. 다른 게시판 유형은 그대로입니다.
+  - **공지(고정) 글은 영향 없음** — 코어가 별도 쿼리로 1페이지 맨 앞에 붙이는 경로를
+    건드리지 않습니다.
+  - **관리자 게시글 목록도 같은 순서**가 됩니다(같은 코어 메서드를 쓰므로). 포럼 게시판에서는
+    관리자 화면의 제목·작성자 정렬이 동작하지 않습니다.
+  - 코어 목록 API 를 부르는 **봇 SSR·외부 연동도 같은 순서**를 받습니다.
+  - "활동"은 글 작성 시각과 **삭제되지 않은** 댓글의 작성 시각 중 늦은 쪽입니다. 글·댓글
+    수정, 리액션, 채택은 활동이 아닙니다. 댓글을 지우면 즉시 반영됩니다. 새 컬럼도 백필도
+    없으며, 정의는 `src/Support/ActivityTime.php` 한 곳에 있고 표시값과 정렬이 이를 공유합니다.
 - **답글 기본 펼침** *(1.1.0 신규)*: 포럼 게시판에서만 답글 스레드가 기본 펼침 상태로
   시작(다른 게시판 유형은 기존처럼 기본 접힘 유지).
 - **고정 · 답글 대상 지목 · 소프트삭제**: `sirsoft-board` 기본 기능을 그대로 사용.
