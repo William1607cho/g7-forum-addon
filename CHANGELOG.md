@@ -5,6 +5,64 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-20
+
+### Added
+
+- **Forum boards are always sorted by last activity.** The post list of a
+  `forum` board is now ordered by last activity, newest first, **server-side and
+  before pagination**, so a thread that just received a comment comes back to the
+  top of page 1 instead of staying wherever its creation date put it.
+
+  "Activity" is the post's own creation time, or the creation time of its most
+  recent **non-deleted** comment, whichever is later. Editing a post or comment
+  is not activity, and neither is a reaction or accepting an answer; deleting a
+  comment drops out of the calculation immediately. Ties are broken by post id,
+  descending. Every post has a value without any new column, table or backfill —
+  a post with no comments falls back to its own creation time.
+
+  The definition now lives in exactly one place, `Support\ActivityTime`, used
+  both by the sort and by the "Last activity" column the board list already
+  displayed, so the two cannot drift apart.
+
+### Changed
+
+- **`sort_by` / `sort_order` and the board's default ordering are ignored on
+  `forum` boards.** This is a visible behaviour change for anyone running this
+  plugin: on a forum board, recent activity is the premise of the screen rather
+  than one option among several, and the list already labels its date column
+  "Last activity". Other board types are completely unaffected and keep using
+  whatever `sirsoft-board` does today.
+
+  Two consequences worth knowing about:
+
+  - **The admin post list for a forum board is sorted by activity too**, because
+    it goes through the same `sirsoft-board` repository method. Sorting that
+    screen by title or author has no effect on forum boards.
+  - **Any other caller of the core list API sees the same order** — server-side
+    rendering for crawlers, and any integration reading
+    `GET /api/modules/sirsoft-board/boards/{slug}/posts`.
+
+  **Pinned (notice) posts are not affected.** `sirsoft-board` fetches them in a
+  separate query and places them at the top of page 1; this plugin does not touch
+  that path.
+
+- `PostRepositoryInterface` is now rebound to
+  `Repositories\ActivitySortedPostRepository`, which extends `sirsoft-board`'s
+  `PostRepository` and overrides one method. Non-forum boards are handed straight
+  back to the parent implementation, and no core source is copied: the sort spec
+  is swapped at the point where the parent hands the already-built query to the
+  core deferred-join paginator. `sirsoft-board` and the template remain
+  unmodified, as before.
+
+### Known limitation
+
+- The sort key is a correlated subquery over `board_comments`, evaluated for
+  every root post of the board before the page is cut. It is backed by
+  `idx_board_comments_post_deleted_created` and is cheap for boards of a few
+  thousand posts; beyond that a materialised column would be needed, which is not
+  possible without modifying `sirsoft-board`.
+
 ## [1.1.1] - 2026-09-17
 
 ### Security
