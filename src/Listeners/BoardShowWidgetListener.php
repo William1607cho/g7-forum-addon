@@ -969,8 +969,8 @@ class BoardShowWidgetListener implements HookListenerInterface
      * 관리자급 핀(고정)/고정해제 버튼 1개.
      *
      * 현재 상태는 `forum_meta.data.is_notice`(= 코어 `board_posts.is_notice`)로 읽는다 —
-     * 애드온이 따로 저장하는 값이 없다. 켜진 상태의 채운 색은 고정 배지(`bg-blue-600`)와
-     * 같은 계열이라 배지와 버튼이 같은 상태를 가리킨다는 것이 한눈에 보인다.
+     * 애드온이 따로 저장하는 값이 없다. 1.4.0 부터 "고정됨" 글자 배지가 없으므로,
+     * **켜진 상태를 알리는 것은 이 버튼의 주황 채움뿐이다**({@see ON_FILL_CLASS}).
      *
      * @param  bool  $forUnpin  true=고정해제 버튼(고정돼 있을 때 표시), false=고정 버튼
      * @return array<string, mixed>
