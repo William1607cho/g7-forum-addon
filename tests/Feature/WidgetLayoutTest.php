@@ -308,6 +308,31 @@ class WidgetLayoutTest extends PluginTestCase
         $this->assertStringNotContainsString('can_manage', (string) ($trophy['if'] ?? ''));
     }
 
+    public function test_no_green_class_remains_anywhere(): void
+    {
+        // 채택 관련 색은 1.4.0 에서 전부 주황으로 옮겼다. 초록이 남아 있으면
+        // 어딘가 한 군데가 옛 색을 계속 쓰고 있다는 뜻이다.
+        foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
+            $json = json_encode($this->node($method), JSON_UNESCAPED_UNICODE);
+            $this->assertStringNotContainsString('green-', $json, $method);
+        }
+    }
+
+    public function test_widget_is_a_single_button_row_with_no_preview_box(): void
+    {
+        $widget = $this->node('widgetNode');
+
+        // 위젯의 직접 자식은 추천 바 · 잠김 배지 · 오른쪽 버튼 묶음 셋뿐이다.
+        $this->assertCount(3, $widget['children']);
+
+        // 채택 답변 전문을 다시 보여주던 박스는 없앴다 — 같은 내용이 아래 댓글
+        // 목록에 이미 있고, 트로피 버튼이 그 자리로 데려다준다.
+        $json = json_encode($widget, JSON_UNESCAPED_UNICODE);
+        $this->assertStringNotContainsString('accepted_reply?.content', $json);
+        $this->assertStringNotContainsString('accepted_reply?.author', $json);
+        $this->assertStringNotContainsString('Avatar', $json);
+    }
+
     public function test_post_trophy_navigates_by_scrolling_not_by_calling_the_api(): void
     {
         $trophy = null;

@@ -50,9 +50,6 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 채택 강조가 이미 적용됐는지 표시하는 마커(멱등) */
     private const ACCEPTED_ROW_MARKER = 'forum_meta?.data?.accepted_reply_id === comment?.id';
 
-    /** 위젯 영역의 채택된 답변 전문 박스 노드의 안정 식별자 */
-    private const ACCEPTED_REPLY_BOX_ID = 'g7_forum_addon_accepted_reply_box';
-
     /** `/meta` 데이터소스 id */
     private const META_DS_ID = 'forum_meta';
 
@@ -454,25 +451,24 @@ class BoardShowWidgetListener implements HookListenerInterface
     }
 
     /**
-     * 주입할 위젯 노드.
+     * 주입할 위젯 노드 — **버튼 한 줄**.
      *
      * ── 1.4.0 레이아웃 ──────────────────────────────────────────
-     * 바깥은 상자가 아니다(테두리·배경 없음, 여백만). 안은 두 층이다.
+     *   ▲n ▼n  (잠김)                                🏆  📢  🔒
      *
-     *   [버튼 줄]  ▲n ▼n  (잠김)                     🏆  📢  🔒
-     *   [채택 답변 전문 박스]
+     * 1.4.0 에서 셋을 걷어냈다.
+     *  - "고정됨"·"채택된 답변 있음" 글자 배지 → 버튼의 주황 채움과 트로피 버튼이 대신한다.
+     *  - 배지를 담던 묶음 `<Div>` → 배지가 하나뿐이라 대부분 빈 채로 `gap` 만 만들었다.
+     *  - **채택 답변 전문 박스** → 같은 내용이 아래 댓글 목록에 이미 있고(채택된 행은
+     *    주황으로 강조된다), 트로피 버튼이 그 자리로 데려다준다. 같은 글을 두 번
+     *    보여주면서 위젯만 길어졌다.
      *
-     * 1.4.0 에서 "고정됨"·"채택된 답변 있음" 글자 배지를 걷어냈다. 그 상태는 이제
-     * **버튼의 채운 색**이 알린다(고정 = 확성기 주황 채움, 채택 = 트로피 버튼 존재).
-     * 배지를 담던 묶음 `<Div>` 도 함께 없앴다 — 배지가 하나뿐이라 묶음이 대부분
-     * 빈 채로 남아 `gap` 만큼 빈자리를 만들기 때문이다. 남은 "잠김" 배지는 줄의
-     * 직접 자식이라, 렌더되지 않으면 `gap` 도 생기지 않는다.
+     * 그 결과 자식이 버튼 줄 하나만 남아, 줄을 감싸던 바깥 `<Div>` 도 없앴다 —
+     * 남겨 두면 빈 껍데기가 위아래 여백만 더한다.
      *
-     * 버튼 줄은 `flex`(줄바꿈 없음)라 좁은 화면에서도 버튼이 한 줄을 지킨다.
+     * 줄은 `flex`(줄바꿈 없음)라 좁은 화면에서도 버튼이 한 줄을 지킨다. 가운데
+     * "잠김" 배지는 줄의 직접 자식이라 렌더되지 않으면 `gap` 도 생기지 않는다.
      * 오른쪽 버튼 묶음은 `ml-auto` 로 끝에 붙는다.
-     *
-     * 채택 답변 박스는 버튼 줄의 형제가 아니라 아래 층이다 — 버튼 줄이 `nowrap` 이라
-     * 그 안에 두면 `w-full` 이 먹지 않고 눌린다.
      *
      * board_type 게이팅은 위젯 노드 전체 `if` 로 유지한다.
      *
@@ -486,51 +482,44 @@ class BoardShowWidgetListener implements HookListenerInterface
             'name' => 'Div',
             'if' => "{{post?.data?.board?.type === 'forum' && post?.data?.status !== 'blinded' && post?.data?.content !== null}}",
             'props' => [
-                // 상자가 아니다. 좌우 여백(mx-6)은 본문 카드와 맞추기 위해 유지한다.
-                'className' => 'mx-6 mt-2 mb-2',
+                // 위젯은 이제 **버튼 한 줄이 전부**다. 줄을 감싸던 바깥 `<Div>` 는
+                // 1.4.0 에서 없앴다 — 배지 묶음과 채택 답변 상자가 빠지면서 자식이
+                // 하나만 남아, 감싸는 노드가 빈 껍데기가 되고 위아래 여백만 더했다.
+                // 좌우 여백(mx-6)은 본문 카드와 줄을 맞추기 위해 유지한다.
+                'className' => 'mx-6 mt-2 mb-2 flex items-center gap-2',
             ],
             'children' => [
+                // 왼쪽: 추천 업·다운.
+                $this->reactionBar('post'),
                 [
-                    // 버튼 줄 — 줄바꿈 없음.
+                    // 잠김 배지 — 유일하게 남은 글자 배지다. 잠긴 글은 읽는 사람도
+                    // 알아야 하는데, 잠금 버튼은 관리자급에게만 보이기 때문이다.
+                    // 묶음 없이 줄의 직접 자식이라 렌더되지 않으면 빈자리도 없다.
+                    'type' => 'basic',
+                    'name' => 'Span',
+                    'if' => '{{forum_meta?.data?.locked}}',
+                    'props' => [
+                        'className' => 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 '
+                            .'text-xs font-semibold text-white bg-orange-700 dark:bg-orange-600',
+                    ],
+                    'text' => '$t:g7-forum-addon.locked_badge',
+                ],
+                [
+                    // 오른쪽 끝 버튼 묶음.
+                    //  - 트로피: 채택된 답변이 있으면 **모두에게** 보인다(권한 무관).
+                    //    누르면 그 댓글로 이동한다.
+                    //  - 확성기·자물쇠: 관리자급(`post.data.abilities.can_manage`)에게만.
                     'type' => 'basic',
                     'name' => 'Div',
-                    'props' => ['className' => 'flex items-center gap-2'],
+                    'props' => ['className' => 'ml-auto flex items-center gap-2 shrink-0'],
                     'children' => [
-                        // 왼쪽: 추천 업·다운.
-                        $this->reactionBar('post'),
-                        [
-                            // 잠김 배지 — 유일하게 남은 글자 배지다. 잠긴 글은 읽는 사람도
-                            // 알아야 하는데, 잠금 버튼은 관리자급에게만 보이기 때문이다.
-                            // 묶음 없이 줄의 직접 자식이라 렌더되지 않으면 빈자리도 없다.
-                            'type' => 'basic',
-                            'name' => 'Span',
-                            'if' => '{{forum_meta?.data?.locked}}',
-                            'props' => [
-                                'className' => 'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 '
-                                    .'text-xs font-semibold text-white bg-orange-700 dark:bg-orange-600',
-                            ],
-                            'text' => '$t:g7-forum-addon.locked_badge',
-                        ],
-                        [
-                            // 오른쪽 끝 버튼 묶음.
-                            //  - 트로피: 채택된 답변이 있으면 **모두에게** 보인다(권한 무관).
-                            //    "채택된 답변 있음" 배지를 대신하면서, 누르면 그 댓글로 이동한다.
-                            //  - 확성기·자물쇠: 관리자급(`post.data.abilities.can_manage`)에게만.
-                            'type' => 'basic',
-                            'name' => 'Div',
-                            'props' => ['className' => 'ml-auto flex items-center gap-2 shrink-0'],
-                            'children' => [
-                                $this->acceptedJumpButton(),
-                                $this->pinToggleButton(false),
-                                $this->pinToggleButton(true),
-                                $this->lockToggleButton(false),
-                                $this->lockToggleButton(true),
-                            ],
-                        ],
+                        $this->acceptedJumpButton(),
+                        $this->pinToggleButton(false),
+                        $this->pinToggleButton(true),
+                        $this->lockToggleButton(false),
+                        $this->lockToggleButton(true),
                     ],
                 ],
-                // 채택된 답변 전문 박스 — forum_meta.data.accepted_reply 가 있을 때만.
-                $this->acceptedReplyBox(),
             ],
         ];
     }
@@ -640,87 +629,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                 'aria-hidden' => 'true',
             ],
             'text' => $textExpr,
-        ];
-    }
-
-    /**
-     * 채택된 답변 전문 박스.
-     *
-     * `forum_meta.data.accepted_reply` 가 있을 때만 렌더된다(없으면 = 채택 안 됨 또는
-     * 채택된 댓글이 삭제·블라인드 등으로 무효화됨 — `AcceptedReplyState::resolveForMeta()`
-     * 가 자기치유하므로 이 박스도 자동으로 사라진다, 별도 처리 불필요).
-     *
-     * 본문은 **`text` 바인딩으로 이스케이프해 렌더**한 뒤, g7-comment-editor 가 페이지
-     * 전역에서 이미 스캔하는 `p.text-gray-700.dark:text-gray-300`(빈 자식 + HTML-ish
-     * 여부 판정) 선택자에 **일부러 같은 클래스를 그대로 얹어** 그 기존 승격
-     * 파이프라인(`sanitizeCommentHtml` 재정화 → `innerHTML` 승격 → `enrichComment`
-     * 외부링크 렌더링)에 편승한다. 댓글 본문을 여기서 다시 안전하게 표시하려고
-     * 새 렌더링 경로(`HtmlContent` composite 의 `dangerouslySetInnerHTML`)를 만들면
-     * DB 원본을 검증 없이 그대로 주입하는 셈이 되어, 사이트 전체가 의존하는
-     * "표시할 때마다 재정화" 방어선을 이 박스만 우회하게 된다 — 그래서 일부러
-     * 기존 댓글과 완전히 같은 표시 경로를 태운다(새 코드 0, g7-comment-editor 무변경).
-     * 클래스 조합(`prose dark:prose-invert prose-sm max-w-none text-gray-700
-     * dark:text-gray-300`)은 이 템플릿(`_modal_privacy.json` 등)에 이미 리터럴로 존재해
-     * Tailwind 빌드 시점에 스캔된 조합만 골랐다(즉석 조합 시 CSS 미생성 함정 재발 방지).
-     *
-     * @return array<string, mixed>
-     */
-    private function acceptedReplyBox(): array
-    {
-        return [
-            'id' => self::ACCEPTED_REPLY_BOX_ID,
-            'type' => 'basic',
-            'name' => 'Div',
-            'if' => '{{!!forum_meta?.data?.accepted_reply}}',
-            'props' => [
-                // 초록 계열 고정값 — 다음 단계(색상 설정 UI)에서 여기 4개 클래스
-                // (bg-green-50/dark:bg-green-900/10/border-green-300/dark:border-green-700)
-                // 를 설정값 기반 동적 스타일로 교체 예정.
-                'className' => 'w-full mt-1 rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/10 p-3',
-            ],
-            'children' => [
-                [
-                    // 작성자 아이콘 + 이름 + 작성 시각.
-                    'type' => 'basic',
-                    'name' => 'Div',
-                    'props' => ['className' => 'flex items-center gap-2 mb-2'],
-                    'children' => [
-                        [
-                            'type' => 'composite',
-                            'name' => 'Avatar',
-                            'props' => [
-                                'author' => '{{forum_meta?.data?.accepted_reply?.author}}',
-                                'size' => 'xs',
-                            ],
-                        ],
-                        [
-                            'type' => 'basic',
-                            'name' => 'Span',
-                            'props' => ['className' => 'text-sm font-medium text-green-800 dark:text-green-300'],
-                            'text' => '{{forum_meta?.data?.accepted_reply?.author?.name ?? \'\'}}',
-                        ],
-                        [
-                            'type' => 'basic',
-                            'name' => 'Span',
-                            'props' => [
-                                'className' => 'text-xs text-green-600 dark:text-green-400',
-                                'title' => '{{forum_meta?.data?.accepted_reply?.created_at ?? \'\'}}',
-                            ],
-                            'text' => '{{forum_meta?.data?.accepted_reply?.created_at_formatted ?? \'\'}}',
-                        ],
-                    ],
-                ],
-                [
-                    // 본문 전문 — text 바인딩(이스케이프) + g7-comment-editor 기존 전역
-                    // 스캐너(class 조합이 앵커)가 재정화·승격을 전담. 새 렌더링 경로 없음.
-                    'type' => 'basic',
-                    'name' => 'P',
-                    'props' => [
-                        'className' => 'prose dark:prose-invert prose-sm max-w-none text-gray-700 dark:text-gray-300',
-                    ],
-                    'text' => '{{forum_meta?.data?.accepted_reply?.content ?? \'\'}}',
-                ],
-            ],
         ];
     }
 

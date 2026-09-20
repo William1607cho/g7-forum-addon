@@ -38,6 +38,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The post no longer repeats the accepted answer.** The widget used to carry a
+  boxed copy of the accepted comment — avatar, name, timestamp and the full body
+  — directly under the buttons. That same comment is already on the page a little
+  further down, now outlined in orange, and the trophy button scrolls straight to
+  it. The copy only made the widget long, and it was still green after the rest
+  of the widget moved to orange.
+
+  Nothing was lost with it: the post response carries every comment (there is no
+  comment pagination), so the accepted one is always in the page, and forum
+  boards already default their reply threads to expanded, so it is reachable even
+  as a reply.
+
+  With the box and the badges gone the widget has a single child left, so the
+  wrapper around the button row went too — it had become an empty node that only
+  added vertical space.
+
 - **A trophy button on the post jumps to the accepted answer.** It appears only
   when an answer has been accepted, and it is shown to **everyone** — it takes
   over from the badge that used to say so. Clicking it scrolls to that comment.
