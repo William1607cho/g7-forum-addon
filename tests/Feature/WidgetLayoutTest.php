@@ -75,9 +75,9 @@ class WidgetLayoutTest extends PluginTestCase
 
     public function test_widget_row_has_four_buttons_two_of_each_toggle_state(): void
     {
-        // 업·다운 2개 + 핀 켜짐/꺼짐 2개 + 잠금 켜짐/꺼짐 2개 = 6개가 조립되고,
-        // 토글은 `if` 로 한쪽만 렌더되므로 화면에 보이는 것은 4개다.
-        $this->assertCount(6, $this->buttons($this->node('widgetNode')));
+        // 업·다운 2개 + 트로피 1개(1.4.0) + 핀 켜짐/꺼짐 2개 + 잠금 켜짐/꺼짐 2개 = 7개가 조립되고,
+        // 토글은 `if` 로 한쪽만 렌더되므로 화면에 보이는 것은 많아야 5개다.
+        $this->assertCount(7, $this->buttons($this->node('widgetNode')));
     }
 
     // ── 아이콘 ───────────────────────────────────────────────
@@ -102,26 +102,24 @@ class WidgetLayoutTest extends PluginTestCase
 
     public function test_every_button_carries_a_tooltip_and_an_aria_label(): void
     {
+        // 1.5.0: 툴팁은 사이트 기준 디자인대로 `title`(브라우저 툴팁)이다.
         foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
             foreach ($this->buttons($this->node($method)) as $button) {
-                $this->assertArrayHasKey('aria-label', $button['props'], $method);
-
-                $tooltips = array_filter(
-                    $button['children'] ?? [],
-                    fn ($c) => is_array($c)
-                        && str_contains((string) ($c['props']['className'] ?? ''), 'group-hover:visible')
-                );
-                $this->assertCount(1, $tooltips, $method.' 버튼에 툴팁이 정확히 1개여야 한다');
+                $this->assertNotSame('', (string) ($button['props']['aria-label'] ?? ''), $method);
+                $this->assertNotSame('', (string) ($button['props']['title'] ?? ''), $method);
             }
         }
     }
 
-    public function test_buttons_do_not_also_set_the_native_title_attribute(): void
+    public function test_buttons_have_no_drawn_tooltip_as_well(): void
     {
-        // `title` 을 같이 두면 커스텀 툴팁과 브라우저 툴팁이 겹쳐 두 번 뜬다.
+        // 1.4.0 의 직접 그린 툴팁 Span 이 남아 있으면 `title` 과 겹쳐 두 번 뜬다.
         foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
             foreach ($this->buttons($this->node($method)) as $button) {
-                $this->assertArrayNotHasKey('title', $button['props'], $method);
+                foreach ($button['children'] ?? [] as $c) {
+                    $this->assertStringNotContainsString('group-hover:', (string) ($c['props']['className'] ?? ''), $method);
+                }
+                $this->assertStringNotContainsString('relative group', (string) ($button['props']['className'] ?? ''), $method);
             }
         }
     }
@@ -187,13 +185,7 @@ class WidgetLayoutTest extends PluginTestCase
     {
         foreach (['widgetNode', 'commentReactionBarNode'] as $method) {
             foreach ($this->voteButtons($method) as $button) {
-                $tooltip = '';
-                foreach ($button['children'] ?? [] as $child) {
-                    if (is_array($child)
-                        && str_contains((string) ($child['props']['className'] ?? ''), 'group-hover:visible')) {
-                        $tooltip = (string) ($child['text'] ?? '');
-                    }
-                }
+                $tooltip = (string) ($button['props']['title'] ?? '');
 
                 $own = strpos($tooltip, 'self_vote_blocked');
                 $login = strpos($tooltip, 'login_required_to_vote');
@@ -286,7 +278,8 @@ class WidgetLayoutTest extends PluginTestCase
             }
         }
 
-        $this->assertContains([null, 'circle-check'], $icons, '미채택은 체크 아이콘');
+        // 채택 버튼은 1.4.0 부터 aria-pressed 를 켜짐/꺼짐 모두 명시한다('false'/'true').
+        $this->assertContains(['false', 'circle-check'], $icons, '미채택은 체크 아이콘');
         $this->assertContains(['true', 'trophy'], $icons, '채택되면 트로피 아이콘');
     }
 

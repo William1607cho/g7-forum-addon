@@ -73,16 +73,16 @@ post API (since 1.1.1).
   a reader would otherwise have no sign.
 - **A trophy on the post** appears when an answer has been accepted — shown to
   everyone — and scrolls to that comment when clicked.
-- **Tooltips.** Every button — in the widget and under each comment — shows its
-  name on hover, immediately. This is a drawn tooltip (`group-hover:` on the
-  button), not the browser's `title`, which waits about a second; `title` is not
-  set at all, because both would appear. `aria-label` still carries the name for
-  assistive tech. A disabled vote button says *why* it is disabled — "sign in to
-  vote" for a signed-out visitor, "you cannot vote on your own post" for the
-  author, the author's message winning when both apply.
+- **Tooltips (1.5.0).** Every button — in the widget and under each comment —
+  carries its name in `title` (the browser tooltip) and `aria-label`, the same as
+  the icon buttons of the `wc-community` template. 1.4.0 drew its own instant
+  tooltip instead; it was dropped so the forum buttons behave like every other
+  button on the site. A disabled vote button's `title` says *why* it is disabled
+  — "sign in to vote" for a signed-out visitor, "you cannot vote on your own
+  post" for the author, the author's message winning when both apply.
 - **Under each comment** the same square buttons appear: upvote, downvote, and —
-  for whoever may accept — an accept / unaccept toggle (`circle-check`, filled
-  green when accepted).
+  for whoever may accept — an accept / unaccept toggle (`circle-check`; a filled
+  orange `trophy` when accepted).
 
 ### Icons
 
@@ -141,6 +141,41 @@ on `board/show` only, transforms the fully-composed layout tree:
   expand/collapse expressions `sirsoft-basic` already renders are patched so their
   "no value yet" default is expanded instead of collapsed; every other board type
   keeps the original default untouched.
+
+- **Tooltip of the replies toggle** *(1.5.0)*: the toggle's `title` is patched with
+  the same rule as its label, so on a forum board the tooltip says "hide replies"
+  when the replies are open (1.4.0 left `title` alone and it said the opposite).
+
+### Template anchors (1.5.0)
+
+The seven places above are found in the template's tree. Until 1.4.0 they were
+found only by **shape** — a class-name token, an `if` string, a child position —
+so a template that restyled one of them silently lost that feature (the failures
+are `warning`s and a site logging at `error` never records them).
+
+From 1.5.0 a template can mark each place with `data-g7-anchor`
+(`props["data-g7-anchor"]` on a node; a `data-g7-anchor` key on the delete-dialog
+step). **If a marker for a place exists anywhere in the tree, that place is
+found by marker only; otherwise the 1.4.0 shape search is used** — so
+`sirsoft-basic` and older `wc-community` releases keep working unchanged.
+
+| Marker | Where | What the add-on does there |
+|---|---|---|
+| `post-actions` | post action-button row | forum widget spliced before it |
+| `comment-input` | new-comment form | lock guard on its `if`, lock notice before it |
+| `comment-body` | read-mode comment body `<P>` | comment vote/accept bar spliced after it |
+| `comment-row` | comment row container | accepted-row highlight appended to its `className`, DOM id |
+| `comment-replies-row` | reply-row visibility `Div` | default-expanded `if` on forum boards |
+| `comment-replies-toggle` | "show replies (N)" button | every `collapsedReplies` expression inside it (icon, label, `title`, click) |
+| `comment-delete-refetch` | delete-dialog `onSuccess` step that refetches `post` | `forum_meta` refetch step after it |
+
+**Checking without logs:** the widget `Div` carries
+`data-g7fa-anchors="post-actions=marker:3,comment-input=marker:3,…"` — for each
+place, how it was found (`marker` / `shape`, or `none` when nothing matched) and
+how many copies were patched (`board/show` inlines the type renderer three
+times; the delete step is one). It is in the layout JSON
+(`/api/layouts/<template>/board/show.json`) and the rendered DOM. If the widget
+itself cannot be placed, the existing `error` log line is the signal.
 
 `BoardIndexWidgetListener` does the same for `board/index` (the board list) —
 splices a "Participants" column and relabels "Created" to "Last activity" on
@@ -326,10 +361,10 @@ other Gnuboard7 plugins.)
     업·다운 `chevron-up`/`chevron-down`(`caret-*` 없음), 고정 `bullhorn`(`thumbtack` 없음;
     이 기능의 실체가 코어 공지라 뜻이 어긋나지 않습니다), 잠금 `lock`(`lock-open` 이 없어
     상태는 모양이 아니라 색으로 구분). **템플릿은 수정하지 않습니다.**
-- **툴팁** *(1.3.0)*: 본글 위젯과 댓글 바의 **모든 버튼**에 마우스를 올리면 이름이 곧바로
-  뜹니다. 브라우저 기본 툴팁(`title`)은 1초쯤 기다려야 떠서 아이콘만 있는 버튼 줄에는
-  맞지 않아, `group-hover:` 로 직접 그립니다. `title` 은 **넣지 않습니다** — 같이 두면
-  두 번 뜹니다. 접근성은 `aria-label` 이 그대로 담당합니다. 본인 글·댓글이라 비활성인
+- **툴팁** *(1.5.0 에서 바뀜)*: 본글 위젯과 댓글 바의 **모든 버튼**이 이름을 `title`(브라우저
+  툴팁)과 `aria-label` 로 갖습니다 — `wc-community` 템플릿의 다른 아이콘 버튼과 같은 방식입니다.
+  1.3.0~1.4.0 은 곧바로 뜨는 툴팁을 `group-hover:` 로 직접 그렸는데, 사이트 전체 버튼과
+  동작을 맞추려고 걷어냈습니다. 본인 글·댓글이라 비활성인
   추천 버튼에는 이유가 뜹니다 — 비회원이면 "로그인 후 추천할 수 있습니다",
   본인 글·댓글이면 "본인 글에는 추천할 수 없습니다"(둘 다면 본인 문구가 우선).
   추천할 수 없는 사용자에게는 버튼이 같은 비활성 표시가 되고 숫자는 그대로 읽힙니다.
