@@ -4,6 +4,8 @@ namespace Plugins\G7\Forum\Addon\Listeners;
 
 use App\Contracts\Extension\HookListenerInterface;
 use Illuminate\Support\Facades\Log;
+use Plugins\G7\Forum\Addon\Support\LayoutAnchors as A;
+use Plugins\G7\Forum\Addon\Support\RepliesDefaultExpanded;
 
 /**
  * 포럼 위젯을 게시글 상세(`board/show`) 레이아웃에 주입하는 리스너.
@@ -143,6 +145,17 @@ class BoardShowWidgetListener implements HookListenerInterface
     /** 채택된 댓글 행에 부여하는 DOM id 접두사 (본글 트로피 버튼의 이동 대상) */
     private const COMMENT_DOM_ID_PREFIX = 'g7fa-comment-';
 
+    /** 위젯 Div 에 다는 점검 속성 — 7자리가 어떻게(표식/모양/실패) 몇 곳 적용됐는지 (1.5.0) */
+    private const CHECK_ATTR = 'data-g7fa-anchors';
+
+    /**
+     * 이번 호출의 트리에 있는 템플릿 표식 ({@see A::present()}).
+     * 표식이 있는 자리는 표식으로만, 없는 자리는 1.4.0 의 모양으로 찾는다.
+     *
+     * @var array<string, true>
+     */
+    private array $present = [];
+
     public static function getSubscribedHooks(): array
     {
         return [
@@ -171,10 +184,18 @@ class BoardShowWidgetListener implements HookListenerInterface
             return $layout;
         }
 
+        // 1.5.0: 템플릿 표식을 먼저 모은다. 삭제 모달은 `modals` 아래에 있다.
+        $this->present = A::present(
+            $layout['components'],
+            isset($layout['modals']) && is_array($layout['modals']) ? $layout['modals'] : []
+        );
+        $counts = array_fill_keys(A::ALL, 0);
+
         // 위젯이 아직 없으면 주입한다(캐시 재적용 등에서 중복 방지 — 멱등).
         if (! $this->treeHasNodeId($layout['components'], self::WIDGET_ID)) {
             $injected = 0;
             $layout['components'] = $this->spliceBeforeActionRows($layout['components'], $injected);
+            $counts[A::POST_ACTIONS] = $injected;
 
             if ($injected === 0) {
                 // 앵커(액션 버튼 줄)를 못 찾음 = sirsoft-basic 구조 변경 가능성.
@@ -190,6 +211,7 @@ class BoardShowWidgetListener implements HookListenerInterface
         if (! $this->treeHasNodeId($layout['components'], self::LOCK_NOTICE_ID)) {
             $lockApplied = 0;
             $layout['components'] = $this->applyLockCommentUi($layout['components'], $lockApplied);
+            $counts[A::COMMENT_INPUT] = $lockApplied;
 
             if ($lockApplied === 0) {
                 Log::warning('[g7-forum-addon] board/show 댓글 입력 폼 앵커를 찾지 못해 잠금 안내 대체를 적용하지 못했습니다. API 레벨 차단은 그대로 유효합니다.', [
@@ -202,6 +224,7 @@ class BoardShowWidgetListener implements HookListenerInterface
         if (! $this->treeHasNodeId($layout['components'], self::COMMENT_REACTIONS_ID)) {
             $reactApplied = 0;
             $layout['components'] = $this->applyCommentReactions($layout['components'], $reactApplied);
+            $counts[A::COMMENT_BODY] = $reactApplied;
 
             if ($reactApplied === 0) {
                 Log::warning('[g7-forum-addon] board/show 댓글 본문 앵커를 찾지 못해 댓글 리액션 바를 주입하지 못했습니다. 게시글 리액션·API 는 그대로 동작합니다.', [
@@ -213,6 +236,7 @@ class BoardShowWidgetListener implements HookListenerInterface
         // 채택된 댓글의 행 전체를 강조하고, 본글 트로피 버튼이 찾아갈 DOM id 를 부여한다(멱등).
         $rowApplied = 0;
         $layout['components'] = $this->applyAcceptedRowHighlight($layout['components'], $rowApplied);
+        $counts[A::COMMENT_ROW] = $rowApplied;
 
         if ($rowApplied === 0) {
             Log::warning('[g7-forum-addon] board/show 댓글 행 컨테이너 앵커를 찾지 못해 채택 강조와 댓글 DOM id 를 적용하지 못했습니다. 채택 버튼과 API 는 그대로 동작하고, 본글의 채택 답변 보기 버튼만 이동 대상을 찾지 못합니다.', [
@@ -237,6 +261,8 @@ class BoardShowWidgetListener implements HookListenerInterface
             $layout['modals'] = $this->applyCommentDeleteMetaRefetch($layout['modals'], $deleteRefetchApplied);
         }
 
+        $counts[A::DELETE_REFETCH] = $deleteRefetchApplied;
+
         if ($deleteRefetchApplied === 0) {
             Log::warning('[g7-forum-addon] 댓글 삭제 모달의 forum_meta 재조회 앵커(dataSourceId=post 재조회 스텝)를 찾지 못했습니다. 채택된 답변이 삭제되면 위젯 박스가 새로고침 전까지 남아있을 수 있습니다(백엔드 자동 해제 자체는 정상 동작).', [
                 'template_id' => $templateId,
@@ -250,16 +276,62 @@ class BoardShowWidgetListener implements HookListenerInterface
         // 평가된다는 점(이미 post.data 로딩 완료)을 이용해, "기본값 분기"만
         // `post?.data?.board?.type === 'forum'` 조건으로 바꿔치기한다. 컴포넌트 트리 안에만
         // 있음을 실측 확인(모달 같은 별도 최상위 키 없음).
-        $repliesApplied = 0;
-        $layout['components'] = $this->applyForumRepliesDefaultExpanded($layout['components'], $repliesApplied);
+        $rowsPatched = 0;
+        $togglesPatched = 0;
+        $layout['components'] = $this->applyForumRepliesDefaultExpanded($layout['components'], $rowsPatched, $togglesPatched);
+        $counts[A::REPLIES_ROW] = $rowsPatched;
+        $counts[A::REPLIES_TOGGLE] = $togglesPatched;
 
-        if ($repliesApplied === 0) {
+        if ($rowsPatched === 0 || $togglesPatched === 0) {
             Log::warning('[g7-forum-addon] board/show 답글 토글 앵커(collapsedReplies 삼항식)를 찾지 못해 forum 답글 기본 펼침을 적용하지 못했습니다. sirsoft-basic 레이아웃 구조 변경 여부 확인 필요.', [
                 'template_id' => $templateId,
+                'rows' => $rowsPatched,
+                'toggles' => $togglesPatched,
             ]);
         }
 
+        // 1.5.0: 7자리 결과를 위젯 Div 속성으로 남긴다. 앵커 실패는 warning 이라 로그 레벨에
+        // 따라 기록되지 않으므로, 레이아웃 JSON·DOM 에서 바로 확인할 수 있게 한다.
+        $report = [];
+        foreach ($counts as $name => $n) {
+            $report[$name] = ['via' => isset($this->present[$name]) ? 'marker' : 'shape', 'count' => $n];
+        }
+        // 이미 적용된 트리를 다시 받은 경우(멱등 재실행)에는 각 자리가 0 으로 세지므로
+        // 이번에 위젯을 넣었을 때만 기록한다.
+        if ($counts[A::POST_ACTIONS] > 0) {
+            $layout['components'] = $this->setPropOnId($layout['components'], self::WIDGET_ID, self::CHECK_ATTR, A::summary($report));
+        }
+
         return $layout;
+    }
+
+    /**
+     * 주어진 id 를 가진 노드(들)의 props 에 값 하나를 넣는다.
+     *
+     * @param  array<int, mixed>  $nodes
+     * @return array<int, mixed>
+     */
+    private function setPropOnId(array $nodes, string $id, string $prop, string $value): array
+    {
+        foreach ($nodes as $i => $node) {
+            if (! is_array($node)) {
+                continue;
+            }
+            if (($node['id'] ?? null) === $id) {
+                $nodes[$i]['props'][$prop] = $value;
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $nodes[$i]['children'] = $this->setPropOnId($node['children'], $id, $prop, $value);
+            }
+        }
+
+        return $nodes;
+    }
+
+    /** 이 자리의 표식이 트리에 있는가 — 있으면 표식으로만 찾는다 */
+    private function usesMarker(string $anchor): bool
+    {
+        return isset($this->present[$anchor]);
     }
 
     /**
@@ -267,28 +339,47 @@ class BoardShowWidgetListener implements HookListenerInterface
      * 시그니처(리터럴 일치)로 찾아 forum 전용 기본-펼침 버전으로 치환한다. 이미
      * 치환됐으면(멱등 — 원본 리터럴과 더 이상 일치하지 않음) 건드리지 않는다.
      *
+     * 1.5.0: 템플릿 표식(`comment-replies-row`·`comment-replies-toggle`)이 있으면 표식으로
+     * 찾고 {@see RepliesDefaultExpanded} 로 식 모양 단위로 바꾼다 — 토글은 `title`(툴팁)·
+     * 화면낭독 문구까지 하위의 모든 식이 바뀐다. 표식이 없으면 1.4.0 의 통째 문자열 비교로
+     * 찾아 같은 치환을 하고, `title` 이 있으면 그것도 바꾼다(1.4.0 은 `title` 을 두어
+     * 포럼 첫 화면에서 툴팁이 "답글 보기" 로 반대였다).
+     *
      * @param  array<int, mixed>  $nodes
-     * @param  int  $applied  (참조) 적용 횟수
+     * @param  int  $rows  (참조) 바꾼 답글 행 수
+     * @param  int  $toggles  (참조) 바꾼 토글 버튼 수
      * @return array<int, mixed>
      */
-    private function applyForumRepliesDefaultExpanded(array $nodes, int &$applied): array
+    private function applyForumRepliesDefaultExpanded(array $nodes, int &$rows, int &$toggles): array
     {
         $out = [];
 
         foreach ($nodes as $node) {
             if (is_array($node)) {
-                if (($node['if'] ?? null) === self::REPLIES_ROW_IF_ORIGINAL) {
-                    $node['if'] = self::REPLIES_ROW_IF_PATCHED;
-                    $applied++;
-                } elseif ($this->isRepliesToggleButton($node)) {
-                    $node['actions'][0]['params']['collapsedReplies'] = self::REPLIES_TOGGLE_SETSTATE_PATCHED;
-                    $node['children'][0]['props']['name'] = self::REPLIES_TOGGLE_ICON_PATCHED;
-                    $node['children'][1]['text'] = self::REPLIES_TOGGLE_LABEL_PATCHED;
-                    $applied++;
+                if ($this->usesMarker(A::REPLIES_ROW) ? A::is($node, A::REPLIES_ROW) : ($node['if'] ?? null) === self::REPLIES_ROW_IF_ORIGINAL) {
+                    $patched = is_string($node['if'] ?? null) ? RepliesDefaultExpanded::patch($node['if']) : null;
+                    if ($patched !== null && $patched !== $node['if']) {
+                        $node['if'] = $this->usesMarker(A::REPLIES_ROW) ? $patched : self::REPLIES_ROW_IF_PATCHED;
+                        $rows++;
+                    }
+                } elseif ($this->usesMarker(A::REPLIES_TOGGLE) ? A::is($node, A::REPLIES_TOGGLE) : $this->isRepliesToggleButton($node)) {
+                    if ($this->usesMarker(A::REPLIES_TOGGLE)) {
+                        $changed = 0;
+                        $node = RepliesDefaultExpanded::patchTree($node, $changed);
+                        $toggles += $changed > 0 ? 1 : 0;
+                    } else {
+                        $node['actions'][0]['params']['collapsedReplies'] = self::REPLIES_TOGGLE_SETSTATE_PATCHED;
+                        $node['children'][0]['props']['name'] = self::REPLIES_TOGGLE_ICON_PATCHED;
+                        $node['children'][1]['text'] = self::REPLIES_TOGGLE_LABEL_PATCHED;
+                        if (is_string($node['props']['title'] ?? null)) {
+                            $node['props']['title'] = RepliesDefaultExpanded::patch($node['props']['title']);
+                        }
+                        $toggles++;
+                    }
                 }
 
                 if (isset($node['children']) && is_array($node['children'])) {
-                    $node['children'] = $this->applyForumRepliesDefaultExpanded($node['children'], $applied);
+                    $node['children'] = $this->applyForumRepliesDefaultExpanded($node['children'], $rows, $toggles);
                 }
             }
 
@@ -365,6 +456,14 @@ class BoardShowWidgetListener implements HookListenerInterface
 
         $insertAt = null;
         foreach ($steps as $i => $step) {
+            if ($this->usesMarker(A::DELETE_REFETCH)) {
+                if (A::is($step, A::DELETE_REFETCH)) {
+                    $insertAt = $i;
+                    break;
+                }
+
+                continue;
+            }
             if (
                 is_array($step)
                 && ($step['handler'] ?? null) === 'refetchDataSource'
@@ -430,6 +529,9 @@ class BoardShowWidgetListener implements HookListenerInterface
     {
         if (! is_array($node)) {
             return false;
+        }
+        if ($this->usesMarker(A::POST_ACTIONS)) {
+            return A::is($node, A::POST_ACTIONS);
         }
         if (($node['type'] ?? null) !== 'basic' || ($node['name'] ?? null) !== 'Div') {
             return false;
@@ -554,6 +656,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             'props' => [
                 'type' => 'button',
                 'className' => $this->squareButtonClass().self::ON_FILL_CLASS,
+                'title' => $label,
                 'aria-label' => $label,
             ],
             'children' => [
@@ -562,7 +665,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'name' => 'Icon',
                     'props' => ['name' => self::TROPHY_ICON, 'ariaLabel' => $label],
                 ],
-                $this->tooltipNode($label),
             ],
             'actions' => [
                 [
@@ -589,47 +691,10 @@ class BoardShowWidgetListener implements HookListenerInterface
      */
     private function squareButtonClass(): string
     {
-        // `relative group` 은 툴팁({@see tooltipNode})을 위한 것이다 — 툴팁 Span 이
-        // 이 버튼을 기준으로 절대 배치되고, `group-hover:` 로 이 버튼에 마우스가
-        // 올라올 때만 보인다.
-        return 'relative group inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ';
-    }
-
-    /**
-     * 버튼 위에 뜨는 툴팁 노드.
-     *
-     * ── 왜 `title` 속성이 아닌가 ─────────────────────────────────
-     * 브라우저 기본 툴팁은 0.5~1초쯤 기다려야 뜬다. 아이콘만 있는 버튼이 네 개 늘어선
-     * 줄에서는 그 지연이 곧 "무슨 버튼인지 모르는 시간"이라, 즉시 뜨는 툴팁을 직접
-     * 그린다. 필요한 유틸리티(`group-hover:visible` · `group-hover:opacity-100` ·
-     * `absolute` · `bottom-full` · `-translate-x-1/2` 등)가 템플릿 빌드 CSS와 코어
-     * 빌드 CSS **양쪽에 모두** 있는 것을 확인하고 골랐다.
-     *
-     * `title` 속성은 **넣지 않는다** — 같이 두면 커스텀 툴팁과 브라우저 툴팁이 겹쳐
-     * 두 번 뜬다. 접근성은 `aria-label` 이 계속 담당하고, 툴팁 자신은
-     * `aria-hidden` + `pointer-events-none` 이라 읽어 주는 도구에서 중복되지 않는다.
-     *
-     * 위로(`bottom-full`) 띄운다. 게시글 본문 카드와 댓글 영역 어느 쪽에도
-     * `overflow-hidden` 이 없어 잘리지 않는다(확인함).
-     *
-     * @param  string  $textExpr  표시할 문구. `$t:` 키 또는 `{{…}}` 표현식
-     * @return array<string, mixed>
-     */
-    private function tooltipNode(string $textExpr): array
-    {
-        return [
-            'type' => 'basic',
-            'name' => 'Span',
-            'props' => [
-                'className' => 'pointer-events-none invisible absolute bottom-full left-1/2 z-50 mb-1 '
-                    .'-translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs '
-                    .'font-normal text-white opacity-0 transition-opacity '
-                    .'group-hover:visible group-hover:opacity-100 '
-                    .'dark:bg-gray-700',
-                'aria-hidden' => 'true',
-            ],
-            'text' => $textExpr,
-        ];
+        // 1.5.0: 툴팁은 사이트 기준 디자인(wc-community fork-20260926)대로 `title`·`aria-label`
+        // 로 준다. 1.4.0 까지 쓰던 즉시 뜨는 자체 툴팁 Span 과 그 기준점(`relative group`)은
+        // 걷어냈다 — 템플릿의 다른 아이콘 버튼과 툴팁 동작을 같게 하려는 것이다.
+        return 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ';
     }
 
     /**
@@ -721,6 +786,12 @@ class BoardShowWidgetListener implements HookListenerInterface
         $className = $this->squareButtonClass().'flex-col gap-0.5 '
             ."{{ ".$blockedExpr." ? '".$blockedCls."' : ((".$mineExpr.") === '".$reaction."' ? '".$activeCls."' : '".$idleCls."') }}";
 
+        // 왜 못 누르는지를 툴팁(title)이 대신 말한다. 우선순위는 본인 글 → 로그인 필요.
+        // ⚠ `$t:` 는 PHP 이중따옴표 안에서 변수 보간으로 먹히므로 홑따옴표로만 잇는다.
+        $title = '{{'.$isOwnExpr.' ? \'$t:g7-forum-addon.self_vote_blocked\''
+            .' : ('.$cannotVoteExpr.' ? \'$t:g7-forum-addon.login_required_to_vote\''
+            .' : \''.$label.'\')}}';
+
         return [
             'type' => 'basic',
             'name' => 'Button',
@@ -728,6 +799,7 @@ class BoardShowWidgetListener implements HookListenerInterface
                 'type' => 'button',
                 'className' => $className,
                 'disabled' => '{{!!'.$blockedExpr.'}}',
+                'title' => $title,
                 'aria-label' => $label,
                 'aria-pressed' => '{{('.$mineExpr.") === '".$reaction."'}}",
             ],
@@ -743,14 +815,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'props' => ['className' => 'text-xs font-medium leading-none'],
                     'text' => '{{'.$countExpr.' ?? 0}}',
                 ],
-                // 왜 못 누르는지를 툴팁이 대신 말한다. 우선순위는 본인 글 → 로그인 필요.
-                // 비활성 버튼도 `:hover` 는 받으므로 툴팁은 그대로 뜬다.
-                // ⚠ `$t:` 는 PHP 이중따옴표 안에서 변수 보간으로 먹히므로 홑따옴표로만 잇는다.
-                $this->tooltipNode(
-                    '{{'.$isOwnExpr.' ? \'$t:g7-forum-addon.self_vote_blocked\''
-                    .' : ('.$cannotVoteExpr.' ? \'$t:g7-forum-addon.login_required_to_vote\''
-                    .' : \''.$label.'\')}}'
-                ),
             ],
             'actions' => [
                 [
@@ -812,6 +876,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             'props' => [
                 'type' => 'button',
                 'className' => $this->squareButtonClass().($on ? $onCls : $offCls),
+                'title' => $labelKey,
                 'aria-label' => $labelKey,
                 'aria-pressed' => $on ? 'true' : 'false',
             ],
@@ -821,7 +886,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                     'name' => 'Icon',
                     'props' => ['name' => $icon, 'ariaLabel' => $labelKey],
                 ],
-                $this->tooltipNode($labelKey),
             ],
             'actions' => [
                 [
@@ -1011,6 +1075,11 @@ class BoardShowWidgetListener implements HookListenerInterface
         if (! is_array($node)) {
             return false;
         }
+        if ($this->usesMarker(A::COMMENT_INPUT)) {
+            // 이미 잠금 조건이 붙은 노드는 다시 적용하지 않는다(멱등).
+            return A::is($node, A::COMMENT_INPUT)
+                && ! str_contains((string) ($node['if'] ?? ''), self::LOCK_IF_MARKER);
+        }
         if (($node['type'] ?? null) !== 'basic' || ($node['name'] ?? null) !== 'Div') {
             return false;
         }
@@ -1153,7 +1222,10 @@ class BoardShowWidgetListener implements HookListenerInterface
 
         foreach ($nodes as $node) {
             if (is_array($node) && $this->isCommentRowContainer($node)) {
-                $node['props']['className'] = self::COMMENT_ROW_CLASS
+                // 1.5.0: 템플릿의 className 뒤에 덧붙인다(모양으로 찾은 경우엔 COMMENT_ROW_CLASS 와
+                // 같은 값이라 1.4.0 결과와 같다. 표식으로 찾으면 템플릿 클래스가 달라도 보존된다).
+                $base = is_string($node['props']['className'] ?? null) ? $node['props']['className'] : '';
+                $node['props']['className'] = trim($base)
                     .' {{'.self::ACCEPTED_ROW_MARKER." ? 'border border-orange-300 bg-orange-50"
                     ." dark:border-orange-700 dark:bg-orange-900/20' : 'border border-transparent'}}";
 
@@ -1183,11 +1255,18 @@ class BoardShowWidgetListener implements HookListenerInterface
      */
     private function isCommentRowContainer(array $node): bool
     {
+        $class = $node['props']['className'] ?? null;
+
+        if ($this->usesMarker(A::COMMENT_ROW)) {
+            // 표식으로 찾을 때는 className 을 가리지 않는다. 이미 강조식이 붙었으면 제외(멱등).
+            return A::is($node, A::COMMENT_ROW)
+                && ! (is_string($class) && str_contains($class, self::ACCEPTED_ROW_MARKER));
+        }
+
         if (($node['name'] ?? null) !== 'Div') {
             return false;
         }
 
-        $class = $node['props']['className'] ?? null;
 
         // 이미 적용된 노드는 className 이 달라져 여기서 걸러진다(멱등).
         if (! is_string($class) || $class !== self::COMMENT_ROW_CLASS) {
@@ -1233,6 +1312,9 @@ class BoardShowWidgetListener implements HookListenerInterface
     {
         if (! is_array($node)) {
             return false;
+        }
+        if ($this->usesMarker(A::COMMENT_BODY)) {
+            return A::is($node, A::COMMENT_BODY);
         }
         if (($node['name'] ?? null) !== 'P') {
             return false;
@@ -1298,6 +1380,7 @@ class BoardShowWidgetListener implements HookListenerInterface
             'props' => [
                 'type' => 'button',
                 'className' => $this->squareButtonClass().($on ? self::ON_FILL_CLASS : $offCls),
+                'title' => $labelKey,
                 'aria-label' => $labelKey,
                 'aria-pressed' => $on ? 'true' : 'false',
             ],
@@ -1310,7 +1393,6 @@ class BoardShowWidgetListener implements HookListenerInterface
                         'ariaLabel' => $labelKey,
                     ],
                 ],
-                $this->tooltipNode($labelKey),
             ],
             'actions' => [$this->acceptAction($on ? 'unaccept' : 'accept')],
         ];

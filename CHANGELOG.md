@@ -5,6 +5,48 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-27
+
+### Added
+
+- **Template anchors.** `board/show` places are now found first by a
+  `data-g7-anchor` marker the template sets (`post-actions`, `comment-input`,
+  `comment-body`, `comment-row`, `comment-replies-row`, `comment-replies-toggle`,
+  `comment-delete-refetch`). If a marker for a place exists anywhere in the tree
+  that place is found by marker only; otherwise the 1.4.0 shape search is used,
+  so `sirsoft-basic` and older `wc-community` releases behave as before. Until
+  now a template that restyled one of these nodes silently lost the feature.
+- **`data-g7fa-anchors` on the widget `Div`** — for each of the seven places, how
+  it was found (`marker` / `shape` / `none`) and how many copies were patched, so
+  a lost anchor is visible in the layout JSON and the DOM even when `warning`s are
+  not logged.
+- Unit tests (`tests/Unit/BoardShowAnchorsTest.php`,
+  `tests/Unit/RepliesDefaultExpandedTest.php`): marked template with changed
+  shapes, unmarked `sirsoft-basic`-shaped template with 1.4.0-identical output,
+  a marker disabling the shape search, idempotency, loud failure when neither
+  matches, `title`/`aria-label` on every widget button.
+
+### Fixed
+
+- **Replies toggle tooltip was the opposite on forum boards.** The toggle's
+  `title` was left with the template's "collapsed by default" expression while
+  its label was patched, so the tooltip said "show replies" over open replies.
+  All `collapsedReplies` expressions under the toggle (icon, label, `title`,
+  click) are now rewritten by one rule; this also applies to templates without
+  markers.
+- The accepted-row highlight is appended to the row's own `className` instead of
+  replacing it with a fixed string (identical result on templates found by shape).
+
+### Changed
+
+- **Tooltips use `title` + `aria-label`**, like the template's icon buttons. The
+  drawn instant tooltip (`group-hover:` span) is removed from the vote, trophy,
+  pin, lock and accept buttons.
+
+### Unchanged
+
+- Routes, API, tables and settings. No migration.
+
 ## [1.4.0] - 2026-09-20
 
 ### Changed
