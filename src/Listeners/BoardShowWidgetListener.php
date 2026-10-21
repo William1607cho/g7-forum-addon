@@ -149,6 +149,13 @@ class BoardShowWidgetListener implements HookListenerInterface
     private const CHECK_ATTR = 'data-g7fa-anchors';
 
     /**
+     * 위젯 Div 에 늘 다는 포럼 표식 (1.6.0). 위젯은 포럼 게시판 글에서만 렌더되므로, 이 속성이
+     * DOM 에 있으면 "포럼 글 보기 화면"이다. 프론트 스크립트(resources/js/last-comment.js)가
+     * 마지막 댓글 자동 이동을 포럼에만 적용하는 데 쓴다.
+     */
+    private const FORUM_MARKER_ATTR = 'data-g7fa-forum';
+
+    /**
      * 이번 호출의 트리에 있는 템플릿 표식 ({@see A::present()}).
      * 표식이 있는 자리는 표식으로만, 없는 자리는 1.4.0 의 모양으로 찾는다.
      *
@@ -589,6 +596,7 @@ class BoardShowWidgetListener implements HookListenerInterface
                 // 하나만 남아, 감싸는 노드가 빈 껍데기가 되고 위아래 여백만 더했다.
                 // 좌우 여백(mx-6)은 본문 카드와 줄을 맞추기 위해 유지한다.
                 'className' => 'mx-6 mt-2 mb-2 flex items-center gap-2',
+                self::FORUM_MARKER_ATTR => 'post',
             ],
             'children' => [
                 // 왼쪽: 추천 업·다운.

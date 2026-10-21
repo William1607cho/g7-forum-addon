@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - unreleased
+
+### Added
+
+- **Jump to the last comment.** Opening a forum post scrolls once to the last
+  comment drawn on the page, after the comments are drawn. Posts without
+  comments do not move, and nothing moves if the reader already started
+  scrolling (wheel, touch drag, scroll keys). The check runs once per address,
+  so writing or deleting a comment later does not move the page. Basic and
+  gallery boards are not affected. No paging, `#comment` hash or read-position
+  handling.
+- First front-end script: `resources/js/last-comment.js`, plain JS loaded on
+  every page (`plugin.json` `assets.js.output`, `loading.strategy: global`). It
+  has no `entry`, so there is no build step — the file is what ships.
+- **`data-g7fa-forum="post"` on the widget `Div`.** The widget renders only on
+  forum posts, so the script uses this attribute to know it is on one. Comment
+  rows are found by the template marker
+  `#post_comments [data-g7-anchor="comment-row"]`.
+
 ## [1.5.0] - 2026-09-27
 
 ### Added
