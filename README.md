@@ -27,6 +27,7 @@ filter hook, which splices widgets into the final `board/show` layout tree.
 | **Board-list participants + last activity** *(new in 1.1.0)* | The board index page gets a "Participants" column (avatar stack, up to 5 recent commenters) and, on forum boards, relabels "Created" to "Last activity" with the most recent comment/post time. One batched, N+1-free query per page. |
 | **Forum boards are always sorted by last activity** *(new in 1.2.0)* | On `forum` boards the post list is ordered by **last activity, newest first** — server-side, before pagination — so a thread that just got a comment returns to the top of page 1. **This overrides `sort_by` / `sort_order` and the board's own default ordering**; on a forum board, recent activity is the premise of the screen rather than one sort option among several. Other board types are untouched. See [Behaviour to be aware of](#behaviour-to-be-aware-of). |
 | **Replies default-expanded on forum boards** *(new in 1.1.0)* | A comment's reply thread starts expanded on forum boards (still collapsed by default everywhere else); the "N replies" toggle keeps working normally in both directions. |
+| **Jump to the last comment** *(new in 1.6.0)* | Opening a forum post scrolls once to the last comment on the page. |
 | **Reply targeting / soft-delete** | Provided by `sirsoft-board` itself; the forum board type inherits them, no code. |
 
 Not yet implemented: edit history, tags, mentions + notifications, subscriptions.
@@ -410,6 +411,7 @@ other Gnuboard7 plugins.)
     없으며, 정의는 `src/Support/ActivityTime.php` 한 곳에 있고 표시값과 정렬이 이를 공유합니다.
 - **답글 기본 펼침** *(1.1.0 신규)*: 포럼 게시판에서만 답글 스레드가 기본 펼침 상태로
   시작(다른 게시판 유형은 기존처럼 기본 접힘 유지).
+- **포럼 글을 열면 마지막 댓글로 이동** *(1.6.0 신규)*
 - **고정 · 답글 대상 지목 · 소프트삭제**: `sirsoft-board` 기본 기능을 그대로 사용.
 
 **설치 순서 주의**: 의존 플러그인 `g7-comment-editor (>= 1.1.0)` 를 **먼저** 설치·활성화한
