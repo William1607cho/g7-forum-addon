@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-10-22
+
+### Fixed
+
+- **PHP fatal error with `sirsoft-board` 1.2.1 (core 7.1.2).** `sirsoft-board`
+  1.2.1 added a sixth optional parameter
+  (`?PostQueryExtensions $extensions = null`) to `PostRepository::paginate()`.
+  `ActivitySortedPostRepository::paginate()` overrode it with five parameters,
+  so PHP rejected the class declaration and the whole site, `artisan` and the
+  queue worker stopped. The override now takes `mixed ...$rest` after the
+  five known parameters and passes it on to the parent unchanged, so it stays
+  compatible with `sirsoft-board` 1.1.x and 1.2.0 (five parameters) and 1.2.1
+  (six), and with any further optional parameter the parent may add.
+- On `sirsoft-board` 1.2.1 the list query extensions (`$extensions`, from the
+  `sirsoft-board.post.list_query_extensions` filter) now reach forum board
+  lists too: they are forwarded to the parent `paginate()`, which applies them
+  before the activity sort replaces only the sort spec.
+
+Update to 1.6.1 before moving the core to 7.1.2. Forum list order, pins and
+the other features are unchanged.
+
 ## [1.6.0] - 2026-10-21
 
 ### Added

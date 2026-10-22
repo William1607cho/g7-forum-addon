@@ -189,7 +189,10 @@ comment-side UI is spliced into the layout by this plugin.
 ## Requirements
 
 - Gnuboard7 `>= 7.0.10`
-- Module **`sirsoft-board >= 1.1.1`**
+- Module **`sirsoft-board >= 1.1.1`** — works with `sirsoft-board` 1.1.x, 1.2.0 and
+  **1.2.1 (core 7.1.2) since this plugin's `1.6.1`** (게시판 모듈 1.2.1(코어 7.1.2) 대응).
+  Update to `1.6.1` **before** moving the core to 7.1.2: `1.6.0` and older stop the
+  whole site with a PHP fatal error on `sirsoft-board` 1.2.1.
 - Plugin **[`g7-comment-editor >= 1.1.0`](https://github.com/William1607cho/g7-comment-editor)**
   — the forum board's comment box uses it for CKEditor. **This must be installed and
   activated first** (see Installation). Raised from `>= 1.0.0` in this plugin's

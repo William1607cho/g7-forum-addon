@@ -79,11 +79,13 @@ class ActivitySortedPostRepository extends PostRepository
      * @param  int  $perPage  페이지당 항목 수
      * @param  bool  $withTrashed  삭제된 게시글 포함 여부
      * @param  Board|null  $board  게시판 모델 (이미 조회된 경우)
+     * @param  mixed  ...$rest  부모가 더 받는 선택 인자 (게시판 1.2.1 의 `?PostQueryExtensions $extensions` 등) — 그대로 부모에 넘긴다
      */
-    public function paginate(string $slug, array $filters = [], int $perPage = 15, bool $withTrashed = false, ?Board $board = null): PaginatorContract
+    public function paginate(string $slug, array $filters = [], int $perPage = 15, bool $withTrashed = false, ?Board $board = null, mixed ...$rest): PaginatorContract
     {
+        // 부모가 선택 인자를 추가해도 받도록 가변 인자 사용(게시판 1.2.1 대응)
         if (! $this->isForumBoard($slug, $board)) {
-            return parent::paginate($slug, $filters, $perPage, $withTrashed, $board);
+            return parent::paginate($slug, $filters, $perPage, $withTrashed, $board, ...$rest);
         }
 
         $this->pendingActivitySort = [[
@@ -92,7 +94,7 @@ class ActivitySortedPostRepository extends PostRepository
         ]];
 
         try {
-            return parent::paginate($slug, $filters, $perPage, $withTrashed, $board);
+            return parent::paginate($slug, $filters, $perPage, $withTrashed, $board, ...$rest);
         } finally {
             // 부모가 예외로 빠져나가도 스펙이 남아 다음 호출을 오염시키지 않게 한다.
             $this->pendingActivitySort = null;
